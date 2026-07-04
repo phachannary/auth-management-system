@@ -1,7 +1,0 @@
-tunnel: 12a6d190-304a-4824-a3c1-0d767e5b6f8b
-credentials-file: C:\Users\User\.cloudflared\12a6d190-304a-4824-a3c1-0d767e5b6f8b.json
-
-ingress:
-  - hostname: laravel-auth.trycloudflare.com
-    service: https://authmanagement.com
-  - service: http_status:404
