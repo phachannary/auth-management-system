@@ -15,7 +15,7 @@
                 </div>
                 <div class="flex items-center space-x-4">
                     <span class="text-sm text-gray-700">
-                        Welcome, {{ is_array($user) ? ($user['UserAttributes'][0]['Value'] ?? 'User') : $user->name }}
+                        Welcome, {{ $user->name }}
                     </span>
                     <form action="{{ route('auth.logout') }}" method="POST" class="inline">
                         @csrf
@@ -47,31 +47,18 @@
                         <div>
                             <h3 class="text-sm font-medium text-gray-500">User Details</h3>
                             <dl class="mt-2 space-y-1">
-                                @if(is_array($user) && isset($user['UserAttributes']))
-                                    @foreach($user['UserAttributes'] as $attribute)
-                                        <div class="flex justify-between py-1">
-                                            <dt class="text-sm font-medium text-gray-900">
-                                                {{ ucfirst(str_replace('_', ' ', $attribute['Name'])) }}:
-                                            </dt>
-                                            <dd class="text-sm text-gray-500">
-                                                {{ $attribute['Value'] }}
-                                            </dd>
-                                        </div>
-                                    @endforeach
-                                @else
-                                    <div class="flex justify-between py-1">
-                                        <dt class="text-sm font-medium text-gray-900">Name:</dt>
-                                        <dd class="text-sm text-gray-500">{{ $user->name }}</dd>
-                                    </div>
-                                    <div class="flex justify-between py-1">
-                                        <dt class="text-sm font-medium text-gray-900">Email:</dt>
-                                        <dd class="text-sm text-gray-500">{{ $user->email }}</dd>
-                                    </div>
-                                    <div class="flex justify-between py-1">
-                                        <dt class="text-sm font-medium text-gray-900">Login Type:</dt>
-                                        <dd class="text-sm text-gray-500">Google OAuth</dd>
-                                    </div>
-                                @endif
+                                <div class="flex justify-between py-1">
+                                    <dt class="text-sm font-medium text-gray-900">Name:</dt>
+                                    <dd class="text-sm text-gray-500">{{ $user->name }}</dd>
+                                </div>
+                                <div class="flex justify-between py-1">
+                                    <dt class="text-sm font-medium text-gray-900">Email:</dt>
+                                    <dd class="text-sm text-gray-500">{{ $user->email }}</dd>
+                                </div>
+                                <div class="flex justify-between py-1">
+                                    <dt class="text-sm font-medium text-gray-900">Verified:</dt>
+                                    <dd class="text-sm text-gray-500">{{ $user->email_verified_at ? 'Yes' : 'No' }}</dd>
+                                </div>
                             </dl>
                         </div>
 
@@ -87,8 +74,14 @@
                                     </dd>
                                 </div>
                                 <div class="flex justify-between py-1">
-                                    <dt class="text-sm font-medium text-gray-900">Username:</dt>
-                                    <dd class="text-sm text-gray-500">{{ $user['Username'] }}</dd>
+                                    <dt class="text-sm font-medium text-gray-900">SSO Session:</dt>
+                                    <dd class="text-sm text-gray-500">
+                                        @if(isset($cognitoTokens))
+                                            <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">Connected</span>
+                                        @else
+                                            <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">Direct Login</span>
+                                        @endif
+                                    </dd>
                                 </div>
                             </dl>
                         </div>

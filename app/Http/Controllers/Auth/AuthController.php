@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
+use App\Models\User;
 
 class AuthController extends Controller
 {
@@ -102,7 +103,7 @@ class AuthController extends Controller
 
     public function showVerificationForm()
     {
-        if (!session('username')) {
+        if (!session('username') && !session('verification_username')) {
             return redirect()->route('auth.register');
         }
 
@@ -126,10 +127,39 @@ class AuthController extends Controller
         \Log::info('Verification result: ' . json_encode($result));
 
         if ($result['success']) {
-            \Log::info('Verification successful, redirecting to login');
+            \Log::info('Verification successful for: ' . $request->username);
 
-            // Clear the username from session after successful verification
-            Session::forget('username');
+            // Check if this is a Google OAuth flow
+            $googleEmail = session('google_oauth_email');
+            if ($googleEmail) {
+                $googleName = session('google_oauth_name');
+                $googleId = session('google_oauth_id');
+
+                $user = User::where('email', $googleEmail)->first();
+                if (!$user) {
+                    $user = User::create([
+                        'name' => $googleName ?? explode('@', $googleEmail)[0],
+                        'email' => $googleEmail,
+                        'google_id' => $googleId,
+                        'email_verified_at' => now(),
+                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
+                    ]);
+                } else {
+                    if (!$user->google_id) {
+                        $user->google_id = $googleId;
+                        $user->email_verified_at = now();
+                        $user->save();
+                    }
+                }
+
+                Auth::login($user);
+                Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
+
+                return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
+            }
+
+            // Regular signup flow - redirect to login
+            Session::forget(['username', 'verification_username']);
 
             return redirect()->route('auth.login')
                 ->with('success', 'Account verified! You can now login.')
@@ -168,83 +198,16 @@ class AuthController extends Controller
         }
     }
 
-    public function redirectToCognito()
-    {
-        $url = $this->cognitoService->getHostedUIUrl();
-
-        // Debug: Log the URL
-        Log::info('Cognito URL: ' . $url);
-
-        return redirect($url);
-    }
-
-    public function handleCognitoCallback(Request $request)
-    {
-        if ($request->has('code')) {
-            $result = $this->cognitoService->exchangeCodeForTokens($request->code);
-
-            if ($result['success']) {
-                $tokens = $result['data'];
-
-                // Store tokens in session
-                Session::put('cognito_tokens', [
-                    'access_token' => $tokens['access_token'],
-                    'refresh_token' => $tokens['refresh_token'],
-                    'id_token' => $tokens['id_token'],
-                    'expires_in' => $tokens['expires_in'],
-                ]);
-
-                // Get user details
-                $userResult = $this->cognitoService->getUser($tokens['access_token']);
-                if ($userResult['success']) {
-                    Session::put('user', $userResult['data']);
-                }
-
-                return redirect()->route('dashboard')->with('success', 'Login successful!');
-            }
-        }
-
-        return redirect()->route('auth.login')->withErrors(['login' => 'Authentication failed']);
-    }
-
-    public function logout()
-    {
-        $tokens = Session::get('cognito_tokens');
-
-        if ($tokens && isset($tokens['access_token'])) {
-            $this->cognitoService->globalSignOut($tokens['access_token']);
-        }
-
-        Session::forget(['cognito_tokens', 'user']);
-
-        return redirect()->route('auth.login')->with('success', 'You have been logged out.');
-    }
-
     public function dashboard()
     {
-        Log::info('Dashboard access attempt', [
-            'auth_check' => Auth::check(),
-            'auth_id' => Auth::id(),
-            'session_cognito_tokens' => Session::has('cognito_tokens'),
-            'session_user' => Session::get('user'),
-        ]);
-
-        // Check if user is logged in via Laravel Auth (Google login) or Cognito
-        if (!Auth::check() && !Session::has('cognito_tokens')) {
-            Log::error('Dashboard access denied: Not authenticated');
+        if (!Auth::check()) {
             return redirect()->route('auth.login');
         }
 
-        // Get user from Laravel Auth (Google login) or session (Cognito)
-        if (Auth::check()) {
-            $user = Auth::user();
-            Log::info('Dashboard accessed via Laravel Auth', ['user_email' => $user->email]);
-        } else {
-            $user = Session::get('user');
-            Log::info('Dashboard accessed via session', ['user_email' => $user->email ?? null]);
-        }
+        $user = Auth::user();
+        $cognitoTokens = Session::get('cognito_tokens');
 
-        return view('dashboard', compact('user'));
+        return view('dashboard', compact('user', 'cognitoTokens'));
     }
 
     public function refreshTokens()
@@ -260,9 +223,10 @@ class AuthController extends Controller
                 // Update tokens in session
                 Session::put('cognito_tokens', [
                     'access_token' => $authResult['AccessToken'],
-                    'refresh_token' => $tokens['refresh_token'], // Keep the same refresh token
+                    'refresh_token' => $tokens['refresh_token'],
                     'id_token' => $authResult['IdToken'],
                     'expires_in' => $authResult['ExpiresIn'],
+                    'token_received_at' => now()->timestamp,
                 ]);
 
                 return response()->json(['success' => true, 'message' => 'Tokens refreshed']);

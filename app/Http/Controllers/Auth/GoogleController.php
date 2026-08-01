@@ -59,12 +59,46 @@ class GoogleController extends Controller
                 'google_oauth_id' => $googleId,
             ]);
 
-            Log::info('Google OAuth: Creating AWS Cognito user to send verification code', ['email' => $email]);
+            Log::info('Google OAuth: Checking user status in Cognito', ['email' => $email]);
+
+            // Check if user already exists and is confirmed in Cognito
+            $statusResult = $this->cognitoService->getUserStatus($username);
+
+            if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
+                Log::info('User already confirmed in Cognito, logging in directly', ['email' => $email]);
+
+                // User is already confirmed - create or update local user and log in
+                $user = User::where('email', $email)->first();
+
+                if (!$user) {
+                    $user = User::create([
+                        'name' => $name ?? explode('@', $email)[0],
+                        'email' => $email,
+                        'google_id' => $googleId,
+                        'email_verified_at' => now(),
+                        'password' => bcrypt(Str::random(32)),
+                    ]);
+                    Log::info('Created local user for already-confirmed Cognito user', ['email' => $email]);
+                } else {
+                    if (!$user->google_id) {
+                        $user->google_id = $googleId;
+                        $user->email_verified_at = now();
+                        $user->save();
+                    }
+                    Log::info('Updated existing local user', ['email' => $email]);
+                }
+
+                Auth::login($user);
+                session()->forget(['auth_state', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
+
+                return redirect()->route('dashboard')->with('success', 'Welcome back!');
+            }
+
+            // User not confirmed - proceed with verification flow
+            Log::info('User not confirmed, proceeding with verification', ['email' => $email]);
 
             // Create AWS Cognito user (required to send verification code)
             $cognitoCheck = $this->cognitoService->signUp($username, $password, $email);
-
-            $alreadyConfirmedInCognito = false;
 
             if (!$cognitoCheck['success']) {
                 Log::info('Cognito signUp skipped (user exists); trying to send fresh OTP', [
@@ -77,20 +111,15 @@ class GoogleController extends Controller
                 $resendResult = $this->cognitoService->resendConfirmationCode($username);
 
                 if (!$resendResult['success']) {
-                    if ($this->isAlreadyConfirmed($resendResult['error'] ?? null)) {
-                        $alreadyConfirmedInCognito = true;
-                        Log::info('Cognito user is already confirmed', ['email' => $email]);
-                    } else {
-                        Log::warning('Unable to send OTP after Google OAuth', [
-                            'email'    => $email,
-                            'username' => $username,
-                            'error'    => $resendResult['error'] ?? null,
-                        ]);
+                    Log::warning('Unable to send OTP after Google OAuth', [
+                        'email'    => $email,
+                        'username' => $username,
+                        'error'    => $resendResult['error'] ?? null,
+                    ]);
 
-                        session()->forget(['auth_state']);
-                        return redirect()->route('auth.login')
-                            ->with('error', 'Unable to send verification code. Please try again or contact support.');
-                    }
+                    session()->forget(['auth_state']);
+                    return redirect()->route('auth.login')
+                        ->with('error', 'Unable to send verification code. Please try again or contact support.');
                 }
             }
 
@@ -104,7 +133,6 @@ class GoogleController extends Controller
                 'verification_otp_session_id'      => $otpSessionId,
                 'verification_code_sent_at'        => now(),
                 'verification_expires_at'          => $expiresAt,
-                'verification_already_confirmed'   => $alreadyConfirmedInCognito,
             ]);
 
             Log::info('Google OAuth: Redirecting to verification form', [
@@ -112,12 +140,8 @@ class GoogleController extends Controller
                 'username' => $username,
             ]);
 
-            $flashMessage = $alreadyConfirmedInCognito
-                ? 'Your email was previously verified. Click the button below to confirm and access your dashboard.'
-                : 'A verification code has been sent to your Gmail. Please enter the 6-digit code.';
-
-            return redirect()->route('auth.verification.form')
-                ->with('info', $flashMessage);
+            return redirect()->route('auth.verify')
+                ->with('info', 'A verification code has been sent to your Gmail. Please enter the 6-digit code.');
 
         } catch (\Exception $e) {
             Log::error('Google login error: ' . $e->getMessage());

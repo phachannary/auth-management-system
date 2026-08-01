@@ -95,12 +95,33 @@ class EmailVerificationController extends Controller
         }
 
         try {
-            Log::info('Calling Cognito confirmSignUp for: ' . $username);
-            $result = $this->cognitoService->confirmSignUp($username, $request->code);
-            Log::info('Cognito confirmSignUp result', [
-                'success' => $result['success'],
-                'error' => $result['error'] ?? null,
+            // Check if user is already confirmed
+            $statusResult = $this->cognitoService->getUserStatus($username);
+            Log::info('User status check', [
+                'username' => $username,
+                'status' => $statusResult['status'] ?? 'UNKNOWN',
+                'success' => $statusResult['success'] ?? false,
             ]);
+
+            // If user is already confirmed, skip verification and proceed
+            if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
+                Log::info('User already confirmed, skipping verification: ' . $username);
+                $result = ['success' => true];
+            } else {
+                Log::info('Calling Cognito confirmSignUp for: ' . $username);
+                $result = $this->cognitoService->confirmSignUp($username, $request->code);
+                Log::info('Cognito confirmSignUp result', [
+                    'success' => $result['success'],
+                    'error' => $result['error'] ?? null,
+                ]);
+
+                // If confirmSignUp fails with "User cannot be confirmed. Current status is CONFIRMED"
+                // it means the user is already confirmed, so we can proceed
+                if (!$result['success'] && strpos($result['error'], 'User cannot be confirmed') !== false) {
+                    Log::info('User is already confirmed despite status check error, proceeding: ' . $username);
+                    $result = ['success' => true];
+                }
+            }
 
             if ($result['success']) {
                 Log::info('Email verified successfully for: ' . $username);

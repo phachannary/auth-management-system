@@ -31,22 +31,24 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'cognito' => [
+        'user_pool_id' => env('COGNITO_USER_POOL_ID'),
+        'client_id' => env('COGNITO_CLIENT_ID'),
+        'client_secret' => env('COGNITO_CLIENT_SECRET'),
+        'region' => env('COGNITO_REGION', 'ap-southeast-2'),
+        'domain' => env('COGNITO_USER_POOL_DOMAIN'),
+    ],
+
     'google' => [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
-        'redirect' => 'https://authmanagement.com/auth/google/callback',
+        'redirect' => env('APP_URL') . '/auth/google/callback',
     ],
 
     'facebook' => [
         'client_id' => env('FACEBOOK_CLIENT_ID'),
         'client_secret' => env('FACEBOOK_CLIENT_SECRET'),
-        'redirect' => 'https://authmanagement.com/auth/facebook/callback',
-        'guzzle' => [
-            'verify' => false,
-        ],
-        // 'redirect' => 'http://localhost:8000/auth/facebook/callback',
-        // 'redirect' => 'http://127.0.0.1:8000/auth/facebook/callback',
-        // 'redirect' => 'https://my-auth-app.loca.lt/auth/facebook/callback'
+        'redirect' => env('APP_URL') . '/auth/facebook/callback',
     ],
 
 ];

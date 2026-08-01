@@ -32,7 +32,7 @@
                     </div>
                 @endif
 
-                <input type="hidden" name="username" value="{{ session('username') }}">
+                <input type="hidden" name="username" value="{{ session('username') ?? session('verification_username') }}">
 
                 <div>
                     <label for="code" class="block text-sm font-medium text-gray-700">Verification Code</label>
@@ -61,7 +61,7 @@
                         Didn't receive the code?
                         <form method="POST" action="{{ route('auth.resend-verify') }}" class="inline">
                             @csrf
-                            <input type="hidden" name="username" value="{{ session('username') }}">
+                            <input type="hidden" name="username" value="{{ session('username') ?? session('verification_username') }}">
                             <button type="submit"
                                 class="font-medium text-indigo-600 hover:text-indigo-500">
                                 Resend code

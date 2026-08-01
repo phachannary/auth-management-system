@@ -104,7 +104,6 @@
                         </svg>
                         Continue with Facebook
                     </a>
-
                 </div>
             </div>
         </div>

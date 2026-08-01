@@ -6,7 +6,10 @@
 /vendor
 .env
 .env.backup
+.env.local
 .env.production
+check_cognito.php
+debug_session.php
 .phpunit.result.cache
 Homestead.json
 Homestead.yaml
