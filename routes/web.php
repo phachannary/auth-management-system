@@ -56,4 +56,15 @@ Route::prefix('auth')->name('auth.')->group(function () {
 Route::middleware('auth')->group(function () {
     Route::get('/dashboard', [AuthController::class, 'dashboard'])->name('dashboard');
     Route::post('/refresh-tokens', [AuthController::class, 'refreshTokens'])->name('refresh.tokens');
+
+    // DEV ONLY: Get Sanctum token for API testing in Postman
+    Route::get('/dev/api-token', function () {
+        $user = auth()->user();
+        $token = $user->createToken('postman-test')->plainTextToken;
+        return response()->json([
+            'token' => $token,
+            'usage' => 'Authorization: Bearer ' . $token,
+            'user' => ['id' => $user->id, 'email' => $user->email],
+        ]);
+    })->name('dev.token');
 });

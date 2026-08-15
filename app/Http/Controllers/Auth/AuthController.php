@@ -38,7 +38,16 @@ class AuthController extends Controller
             'terms' => 'required|accepted',
         ]);
 
-        // Create local user first
+        // Create AWS Cognito user first to get the sub
+        $result = $this->cognitoService->signUp($credentials['username'], $credentials['password'], $credentials['email']);
+
+        \Log::info('Registration result: ' . json_encode($result));
+
+        if (!$result['success']) {
+            return back()->withErrors(['username' => $result['error']]);
+        }
+
+        // Create local user (cognito_sub will be added after confirmation)
         $user = User::create([
             'name' => $credentials['username'],
             'email' => $credentials['email'],
@@ -48,25 +57,14 @@ class AuthController extends Controller
 
         \Log::info('Local user created during registration: ' . $user->email);
 
-        // Create AWS Cognito user
-        $result = $this->cognitoService->signUp($credentials['username'], $credentials['password'], $credentials['email']);
+        // Set session data for verification (not flash data)
+        Session::put('verification_username', $credentials['username']);
+        Session::put('verification_email', $credentials['email']);
+        Session::put('verification_expires_at', now()->addMinutes(30));
 
-        \Log::info('Registration result: ' . json_encode($result));
-
-        if ($result['success']) {
-            // Set session data for verification (not flash data)
-            Session::put('verification_username', $credentials['username']);
-            Session::put('verification_email', $credentials['email']);
-            Session::put('verification_expires_at', now()->addMinutes(30));
-
-            return redirect()->route('auth.verify')->with(
-                'success', 'Registration successful! Please check your email for verification code.'
-            );
-        } else {
-            // Delete local user if Cognito creation failed
-            $user->delete();
-            return back()->withErrors(['username' => $result['error']]);
-        }
+        return redirect()->route('auth.verify')->with(
+            'success', 'Registration successful! Please check your email for verification code.'
+        );
     }
 
     public function login(Request $request)
@@ -86,12 +84,22 @@ class AuthController extends Controller
             // Store tokens in session
             Session::put('cognito_tokens', $result['data']);
 
-            // Get user details - AccessToken is inside AuthenticationResult
+            // Get user details and update with cognito_sub
             $accessToken = $result['data']['AuthenticationResult']['AccessToken'] ?? null;
             if ($accessToken) {
                 $userResult = $this->cognitoService->getUser($accessToken);
                 if ($userResult['success']) {
                     Session::put('user', $userResult['data']);
+
+                    // Update local user with Cognito sub
+                    $cognitoUsername = $userResult['data']['Username'] ?? null;
+                    $localUser = User::where('email', $credentials['username'])->first();
+                    if ($localUser && $cognitoUsername) {
+                        // We'll get the actual sub from the ID token on next login
+                        // For now, store the username which can help identify the user
+                        $localUser->cognito_username = $cognitoUsername;
+                        $localUser->save();
+                    }
                 }
             }
 

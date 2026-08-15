@@ -23,6 +23,8 @@ class User extends Authenticatable
         'password',
         'facebook_id',
         'google_id',
+        'cognito_sub',
+        'cognito_username',
     ];
 
     /**
@@ -43,4 +45,27 @@ class User extends Authenticatable
     protected $casts = [
         'email_verified_at' => 'datetime',
     ];
+
+    public function appRoles()
+    {
+        return $this->belongsToMany(App::class, 'user_app_role')
+                    ->withPivot('role_id')
+                    ->withTimestamps();
+    }
+
+    public function rolesForApp($appSlug)
+    {
+        return Role::whereIn('id',
+            \DB::table('user_app_role')
+                ->join('apps', 'apps.id', '=', 'user_app_role.app_id')
+                ->where('user_app_role.user_id', $this->id)
+                ->where('apps.slug', $appSlug)
+                ->pluck('user_app_role.role_id')
+        )->get();
+    }
+
+    public function hasRoleInApp($roleSlug, $appSlug)
+    {
+        return $this->rolesForApp($appSlug)->contains('slug', $roleSlug);
+    }
 }

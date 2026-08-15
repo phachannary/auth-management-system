@@ -108,20 +108,34 @@ class CognitoLoginController extends Controller
                 return redirect()->route('auth.login')->with('error', 'No email found in token');
             }
 
-            // Create or update local user
-            $user = User::firstOrCreate(
-                ['email' => $email],
-                [
+            // Create or update local user with Cognito sub
+            $user = User::where('cognito_sub', $sub)->first();
+
+            if (!$user) {
+                $user = User::where('email', $email)->first();
+            }
+
+            if ($user) {
+                // Update existing user with Cognito identity
+                $user->cognito_sub = $sub;
+                $user->cognito_username = $claims['cognito:username'] ?? null;
+                if ($name && $user->name !== $name) {
+                    $user->name = $name;
+                }
+                if (!$user->email_verified_at) {
+                    $user->email_verified_at = now();
+                }
+                $user->save();
+            } else {
+                // Create new user with Cognito identity
+                $user = User::create([
                     'name' => $name ?? explode('@', $email)[0],
+                    'email' => $email,
+                    'cognito_sub' => $sub,
+                    'cognito_username' => $claims['cognito:username'] ?? null,
                     'password' => bcrypt(\Illuminate\Support\Str::random(32)),
                     'email_verified_at' => now(),
-                ]
-            );
-
-            // Update name if changed
-            if ($name && $user->name !== $name) {
-                $user->name = $name;
-                $user->save();
+                ]);
             }
 
             // Store Cognito tokens in session
