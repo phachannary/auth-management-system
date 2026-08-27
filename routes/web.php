@@ -21,6 +21,11 @@ Route::get('/', function () {
     return view('home');
 })->name('home');
 
+// Legal Pages
+Route::get('/privacy', function () {
+    return view('privacy');
+})->name('privacy');
+
 
 // Authentication Routes
 Route::prefix('auth')->name('auth.')->group(function () {
