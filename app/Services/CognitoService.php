@@ -48,6 +48,9 @@ class CognitoService
 
         if ($credentials) {
             $config['credentials'] = $credentials;
+        } else {
+            // Disable instance profile and other credential providers
+            $config['credentials'] = false;
         }
 
         $this->client = new CognitoIdentityProviderClient($config);
