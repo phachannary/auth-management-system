@@ -34,7 +34,7 @@ class VerifyCognitoToken
             return response()->json(['error' => 'Invalid or expired token.'], 401);
         }
 
-        $payload = $result['payload'];
+        $payload = $result['data'];
         $sub = $payload['sub'] ?? null;
         $clientId = $payload['client_id'] ?? null;
         $email = $payload['email'] ?? null;

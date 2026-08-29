@@ -21,6 +21,24 @@ class AuthController extends Controller
 
     public function showLoginForm()
     {
+        // Clear stale verification session data when visiting login page
+        Session::forget([
+            'username',
+            'verification_username',
+            'verification_email',
+            'verification_expires_at',
+            'verification_otp_session_id',
+            'verification_code_sent_at',
+            'verification_already_confirmed',
+            'google_oauth_email',
+            'google_oauth_name',
+            'google_oauth_id',
+            'facebook_oauth_email',
+            'facebook_oauth_name',
+            'facebook_oauth_id',
+            'auth_state',
+        ]);
+
         return view('auth.login');
     }
 
@@ -69,6 +87,24 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
+        // Clear stale verification session data on login attempt
+        Session::forget([
+            'username',
+            'verification_username',
+            'verification_email',
+            'verification_expires_at',
+            'verification_otp_session_id',
+            'verification_code_sent_at',
+            'verification_already_confirmed',
+            'google_oauth_email',
+            'google_oauth_name',
+            'google_oauth_id',
+            'facebook_oauth_email',
+            'facebook_oauth_name',
+            'facebook_oauth_id',
+            'auth_state',
+        ]);
+
         $credentials = $request->validate([
             'username' => 'required|string',
             'password' => 'required',
@@ -81,25 +117,44 @@ class AuthController extends Controller
         \Log::info('Login result: ' . json_encode($result));
 
         if ($result['success']) {
+            // Regenerate session to prevent session fixation
+            Session::regenerate();
+
             // Store tokens in session
             Session::put('cognito_tokens', $result['data']);
 
             // Get user details and update with cognito_sub
             $accessToken = $result['data']['AuthenticationResult']['AccessToken'] ?? null;
+            $idToken = $result['data']['AuthenticationResult']['IdToken'] ?? null;
+
             if ($accessToken) {
                 $userResult = $this->cognitoService->getUser($accessToken);
                 if ($userResult['success']) {
                     Session::put('user', $userResult['data']);
 
-                    // Update local user with Cognito sub
+                    // Update local user with Cognito sub and username
                     $cognitoUsername = $userResult['data']['Username'] ?? null;
                     $localUser = User::where('email', $credentials['username'])->first();
+
                     if ($localUser && $cognitoUsername) {
-                        // We'll get the actual sub from the ID token on next login
-                        // For now, store the username which can help identify the user
                         $localUser->cognito_username = $cognitoUsername;
+
+                        // Extract sub from ID token if available
+                        if ($idToken) {
+                            $tokenValidation = $this->cognitoService->validateIdToken($idToken);
+                            if ($tokenValidation['success']) {
+                                $sub = $tokenValidation['data']['sub'] ?? null;
+                                if ($sub) {
+                                    $localUser->cognito_sub = $sub;
+                                }
+                            }
+                        }
+
                         $localUser->save();
                     }
+
+                    // Log in with Laravel Auth
+                    Auth::login($localUser);
                 }
             }
 
@@ -113,6 +168,18 @@ class AuthController extends Controller
     {
         if (!session('username') && !session('verification_username')) {
             return redirect()->route('auth.register');
+        }
+
+        $username = session('username') ?: session('verification_username');
+
+        // Check if user is already confirmed in Cognito
+        $statusResult = $this->cognitoService->getUserStatus($username);
+        if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
+            // User is already confirmed, clear session and redirect to login
+            Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
+            return redirect()->route('auth.login')
+                ->with('success', 'Your account is already verified. Please login.')
+                ->with('verified_username', $username);
         }
 
         return view('auth.verify');
@@ -162,6 +229,35 @@ class AuthController extends Controller
 
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
+
+                return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
+            }
+
+            // Check if this is a Facebook OAuth flow
+            $facebookEmail = session('facebook_oauth_email');
+            if ($facebookEmail) {
+                $facebookName = session('facebook_oauth_name');
+                $facebookId = session('facebook_oauth_id');
+
+                $user = User::where('email', $facebookEmail)->first();
+                if (!$user) {
+                    $user = User::create([
+                        'name' => $facebookName ?? explode('@', $facebookEmail)[0],
+                        'email' => $facebookEmail,
+                        'facebook_id' => $facebookId,
+                        'email_verified_at' => now(),
+                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
+                    ]);
+                } else {
+                    if (!$user->facebook_id) {
+                        $user->facebook_id = $facebookId;
+                        $user->email_verified_at = now();
+                        $user->save();
+                    }
+                }
+
+                Auth::login($user);
+                Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
 
                 return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }

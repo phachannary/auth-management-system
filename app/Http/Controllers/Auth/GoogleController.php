@@ -49,6 +49,17 @@ class GoogleController extends Controller
                 return redirect()->route('auth.login')->with('error', 'Google email not found.');
             }
 
+            // Check if user already exists in local database with Google ID
+            $existingUser = User::where('google_id', $googleId)->first();
+
+            if ($existingUser && $existingUser->email_verified_at) {
+                // User exists and is verified - log them in directly
+                Auth::login($existingUser);
+                Log::info('Google OAuth: Existing verified user logged in', ['email' => $email]);
+                session()->forget(['auth_state']);
+                return redirect()->route('dashboard')->with('success', 'Welcome back!');
+            }
+
             $username = strtolower(explode('@', $email)[0]);
             $password  = 'GoogleOAuth_' . $googleId . '!A1';
 
@@ -89,6 +100,7 @@ class GoogleController extends Controller
                 }
 
                 Auth::login($user);
+                Session::regenerate();
                 session()->forget(['auth_state', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
 
                 return redirect()->route('dashboard')->with('success', 'Welcome back!');

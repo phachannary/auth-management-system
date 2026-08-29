@@ -32,7 +32,7 @@ class FacebookController extends Controller
     }
 
     /**
-     * Handle Facebook OAuth callback - requires email verification
+     * Handle Facebook OAuth callback - skip verification for existing verified users
      */
     public function handleFacebookCallback()
     {
@@ -48,6 +48,18 @@ class FacebookController extends Controller
                     ->withErrors(['login' => 'Facebook did not provide email. Please use another login method.']);
             }
 
+            // Check if user already exists in local database with Facebook ID
+            $existingUser = User::where('facebook_id', $facebookId)->first();
+
+            if ($existingUser && $existingUser->email_verified_at) {
+                // User exists and is verified - log them in directly
+                Auth::login($existingUser);
+                Session::regenerate();
+                Log::info('Facebook OAuth: Existing verified user logged in', ['email' => $email]);
+                return redirect()->route('dashboard')->with('success', 'Welcome back!');
+            }
+
+            // New user or unverified user - proceed with verification flow
             $username = 'fb_' . strtolower(preg_replace('/[^a-z0-9]/', '', $email));
             $password  = 'FacebookOAuth_' . $facebookId . '!A1';
 
@@ -115,7 +127,7 @@ class FacebookController extends Controller
                 ? 'Your email was previously verified. Click the button below to confirm and access your dashboard.'
                 : 'A verification code has been sent to your email. Please enter the 6-digit code.';
 
-            return redirect()->route('auth.verification.form')
+            return redirect()->route('auth.verify')
                 ->with('info', $flashMessage);
 
         } catch (\Exception $e) {

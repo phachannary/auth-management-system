@@ -101,11 +101,16 @@ class CognitoLoginController extends Controller
             }
 
             $claims = $validationResult['data'];
+            $sub = $claims['sub'] ?? null;
             $email = $claims['email'] ?? null;
             $name = $claims['name'] ?? $claims['cognito:username'] ?? null;
 
             if (!$email) {
                 return redirect()->route('auth.login')->with('error', 'No email found in token');
+            }
+
+            if (!$sub) {
+                return redirect()->route('auth.login')->with('error', 'No sub found in token');
             }
 
             // Create or update local user with Cognito sub
@@ -149,6 +154,9 @@ class CognitoLoginController extends Controller
 
             // Log in with Laravel Auth
             Auth::login($user, true);
+
+            // Regenerate session to prevent session fixation
+            Session::regenerate();
 
             Log::info('User logged in via Cognito Hosted UI', ['email' => $email]);
 
