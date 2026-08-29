@@ -313,7 +313,7 @@ class CognitoService
         $params = [
             'client_id' => $this->clientId,
             'response_type' => 'code',
-            'scope' => 'email openid phone',
+            'scope' => 'email openid profile',
             'redirect_uri' => $redirectUri,
         ];
 
