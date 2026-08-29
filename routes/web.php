@@ -43,17 +43,15 @@ Route::prefix('auth')->name('auth.')->group(function () {
         return redirect()->route('auth.login')->with('success', 'Session cleared. Please login.');
     })->name('clear-session');
 
+    // Socialite OAuth (working implementations)
+    Route::get('/google', [GoogleController::class, 'redirectToGoogle'])->name('google');
+    Route::get('/google/callback', [GoogleController::class, 'handleGoogleCallback'])->name('google.callback');
+    Route::get('/facebook', [FacebookController::class, 'redirectToFacebook'])->name('facebook');
+    Route::get('/facebook/callback', [FacebookController::class, 'handleFacebookCallback'])->name('facebook.callback');
+
     // Cognito Hosted UI (SSO: handles Google, Facebook, and Cognito login)
     Route::get('/cognito', [CognitoLoginController::class, 'redirectToCognito'])->name('cognito');
     Route::get('/cognito/callback', [CognitoLoginController::class, 'handleCognitoCallback'])->name('cognito.callback');
-
-    // Cognito direct provider redirects
-    Route::get('/google', [CognitoLoginController::class, 'redirectToGoogle'])->name('google');
-    Route::get('/facebook', [CognitoLoginController::class, 'redirectToFacebook'])->name('facebook');
-
-    // Socialite OAuth (fallback - working implementations)
-    Route::get('/google/callback', [GoogleController::class, 'handleGoogleCallback'])->name('google.callback');
-    Route::get('/facebook/callback', [FacebookController::class, 'handleFacebookCallback'])->name('facebook.callback');
 
     // Logout (clears local + Cognito session)
     Route::post('/logout', [CognitoLoginController::class, 'logout'])->name('logout');
