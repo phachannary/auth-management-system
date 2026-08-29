@@ -51,6 +51,10 @@ Route::prefix('auth')->name('auth.')->group(function () {
     Route::get('/google', [CognitoLoginController::class, 'redirectToGoogle'])->name('google');
     Route::get('/facebook', [CognitoLoginController::class, 'redirectToFacebook'])->name('facebook');
 
+    // Socialite OAuth (fallback - working implementations)
+    Route::get('/google/callback', [GoogleController::class, 'handleGoogleCallback'])->name('google.callback');
+    Route::get('/facebook/callback', [FacebookController::class, 'handleFacebookCallback'])->name('facebook.callback');
+
     // Logout (clears local + Cognito session)
     Route::post('/logout', [CognitoLoginController::class, 'logout'])->name('logout');
     Route::get('/logout', [CognitoLoginController::class, 'logout'])->name('logout.get');
