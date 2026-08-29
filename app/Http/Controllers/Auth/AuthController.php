@@ -175,8 +175,23 @@ class AuthController extends Controller
         // Check if user is already confirmed in Cognito
         $statusResult = $this->cognitoService->getUserStatus($username);
         if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
-            // User is already confirmed, clear session and redirect to login
-            Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
+            // User is already confirmed, clear ALL verification-related session data
+            Session::forget([
+                'username',
+                'verification_username',
+                'verification_email',
+                'verification_expires_at',
+                'verification_otp_session_id',
+                'verification_code_sent_at',
+                'verification_already_confirmed',
+                'google_oauth_email',
+                'google_oauth_name',
+                'google_oauth_id',
+                'facebook_oauth_email',
+                'facebook_oauth_name',
+                'facebook_oauth_id',
+                'auth_state',
+            ]);
             return redirect()->route('auth.login')
                 ->with('success', 'Your account is already verified. Please login.')
                 ->with('verified_username', $username);
@@ -193,6 +208,74 @@ class AuthController extends Controller
         ]);
 
         \Log::info('Attempting verification for username: ' . $request->username . ' with code: ' . $request->code);
+
+        // Check if user is already confirmed in Cognito before attempting verification
+        $statusResult = $this->cognitoService->getUserStatus($request->username);
+        if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
+            \Log::info('User already confirmed in Cognito, skipping verification', ['username' => $request->username]);
+
+            // Check if this is a Google OAuth flow
+            $googleEmail = session('google_oauth_email');
+            if ($googleEmail) {
+                $googleName = session('google_oauth_name');
+                $googleId = session('google_oauth_id');
+
+                $user = User::where('email', $googleEmail)->first();
+                if (!$user) {
+                    $user = User::create([
+                        'name' => $googleName ?? explode('@', $googleEmail)[0],
+                        'email' => $googleEmail,
+                        'google_id' => $googleId,
+                        'email_verified_at' => now(),
+                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
+                    ]);
+                } else {
+                    if (!$user->google_id) {
+                        $user->google_id = $googleId;
+                        $user->email_verified_at = now();
+                        $user->save();
+                    }
+                }
+
+                Auth::login($user);
+                Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
+
+                return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
+            }
+
+            // Check if this is a Facebook OAuth flow
+            $facebookEmail = session('facebook_oauth_email');
+            if ($facebookEmail) {
+                $facebookName = session('facebook_oauth_name');
+                $facebookId = session('facebook_oauth_id');
+
+                $user = User::where('email', $facebookEmail)->first();
+                if (!$user) {
+                    $user = User::create([
+                        'name' => $facebookName ?? explode('@', $facebookEmail)[0],
+                        'email' => $facebookEmail,
+                        'facebook_id' => $facebookId,
+                        'email_verified_at' => now(),
+                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
+                    ]);
+                } else {
+                    if (!$user->facebook_id) {
+                        $user->facebook_id = $facebookId;
+                        $user->email_verified_at = now();
+                        $user->save();
+                    }
+                }
+
+                Auth::login($user);
+                Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
+
+                return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
+            }
+
+            // Regular registration flow - just redirect to login
+            Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
+            return redirect()->route('auth.login')->with('success', 'Your account is already verified. Please login.');
+        }
 
         $result = $this->cognitoService->confirmSignUp(
             $request->username,
