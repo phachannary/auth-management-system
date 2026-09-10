@@ -66,6 +66,7 @@ class AuthController extends Controller
         }
 
         // Create local user (cognito_sub will be added after confirmation)
+        // Store username in 'name' field for login lookup
         $user = User::create([
             'name' => $credentials['username'],
             'email' => $credentials['email'],
@@ -133,8 +134,9 @@ class AuthController extends Controller
                     Session::put('user', $userResult['data']);
 
                     // Update local user with Cognito sub and username
+                    // Search by username (stored in 'name' field) instead of email
                     $cognitoUsername = $userResult['data']['Username'] ?? null;
-                    $localUser = User::where('email', $credentials['username'])->first();
+                    $localUser = User::where('name', $credentials['username'])->first();
 
                     if ($localUser && $cognitoUsername) {
                         $localUser->cognito_username = $cognitoUsername;
