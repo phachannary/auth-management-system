@@ -21,6 +21,11 @@
                         Code sent to: {{ session('code_delivery_details')['Destination'] ?? 'your email' }}
                     </p>
                 @endif
+                <div class="mt-4 bg-blue-50 border border-blue-200 rounded-md p-3">
+                    <p class="text-xs text-blue-800 text-center">
+                        <strong>Don't see the email?</strong> Check your spam folder or use the resend button below.
+                    </p>
+                </div>
             </div>
 
             @if(session('success'))
@@ -74,6 +79,16 @@
                         </form>
                     </p>
                 </div>
+
+                @if(config('app.debug'))
+                <div class="mt-4 text-center">
+                    <p class="text-xs text-gray-500">
+                        <a href="{{ route('auth.clear-session') }}" class="text-gray-400 hover:text-gray-600">
+                            Clear session and start over
+                        </a>
+                    </p>
+                </div>
+                @endif
             </form>
 
             <div class="text-center">
