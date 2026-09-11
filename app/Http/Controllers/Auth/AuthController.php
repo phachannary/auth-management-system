@@ -202,44 +202,60 @@ class AuthController extends Controller
 
             return redirect()->route('dashboard')->with('success', 'Login successful!');
         } else {
+            // Handle UserNotConfirmedException specifically
+            if (isset($result['error']) && $result['error'] === 'UserNotConfirmedException') {
+                // Store username in session for verification page
+                Session::put('verification_username', $result['username'] ?? $credentials['username']);
+                
+                // Redirect to verification page with a helpful message
+                return redirect()->route('auth.verify')
+                    ->with('error', 'Please verify your email before logging in.')
+                    ->with('resend_available', true);
+            }
+            
             return back()->withErrors(['username' => $result['error']]);
         }
     }
 
     public function showVerificationForm()
     {
-        if (!session('username') && !session('verification_username')) {
-            return redirect()->route('auth.register');
+        // Allow username from session or from old input (after failed verification)
+        $username = session('username') ?: session('verification_username') ?: old('username');
+        
+        // Don't redirect if no username - allow manual entry for unconfirmed users
+        // who are redirected from login
+
+        // Check if user is already confirmed in Cognito (only if we have a username)
+        if ($username) {
+            $statusResult = $this->cognitoService->getUserStatus($username);
+            if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
+                // User is already confirmed, clear ALL verification-related session data
+                Session::forget([
+                    'username',
+                    'verification_username',
+                    'verification_email',
+                    'verification_expires_at',
+                    'verification_otp_session_id',
+                    'verification_code_sent_at',
+                    'verification_already_confirmed',
+                    'google_oauth_email',
+                    'google_oauth_name',
+                    'google_oauth_id',
+                    'facebook_oauth_email',
+                    'facebook_oauth_name',
+                    'facebook_oauth_id',
+                    'auth_state',
+                ]);
+                return redirect()->route('auth.login')
+                    ->with('success', 'Your account is already verified. Please login.')
+                    ->with('verified_username', $username);
+            }
         }
 
-        $username = session('username') ?: session('verification_username');
-
-        // Check if user is already confirmed in Cognito
-        $statusResult = $this->cognitoService->getUserStatus($username);
-        if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
-            // User is already confirmed, clear ALL verification-related session data
-            Session::forget([
-                'username',
-                'verification_username',
-                'verification_email',
-                'verification_expires_at',
-                'verification_otp_session_id',
-                'verification_code_sent_at',
-                'verification_already_confirmed',
-                'google_oauth_email',
-                'google_oauth_name',
-                'google_oauth_id',
-                'facebook_oauth_email',
-                'facebook_oauth_name',
-                'facebook_oauth_id',
-                'auth_state',
-            ]);
-            return redirect()->route('auth.login')
-                ->with('success', 'Your account is already verified. Please login.')
-                ->with('verified_username', $username);
-        }
-
-        return view('auth.verify');
+        return view('auth.verify', [
+            'username' => $username,
+            'resend_available' => session('resend_available')
+        ]);
     }
 
     public function verify(Request $request)
@@ -248,6 +264,9 @@ class AuthController extends Controller
             'username' => 'required',
             'code' => 'required|string|size:6',
         ]);
+
+        // Store username in session for future use
+        Session::put('verification_username', $request->username);
 
 
 
@@ -421,7 +440,7 @@ class AuthController extends Controller
                 $errorMessage = 'User not found. Please register first.';
             }
 
-            return back()->withErrors(['code' => $errorMessage]);
+            return back()->withInput(['username' => $request->username])->withErrors(['code' => $errorMessage]);
         }
     }
 

@@ -34,6 +34,12 @@
                 </div>
             @endif
 
+            @if(session('error'))
+                <div class="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded relative">
+                    {{ session('error') }}
+                </div>
+            @endif
+
             <form class="mt-8 space-y-6" action="{{ route('auth.verify') }}" method="POST">
                 @csrf
                 @if($errors->any())
@@ -42,7 +48,16 @@
                     </div>
                 @endif
 
-                <input type="hidden" name="username" value="{{ session('username') ?? session('verification_username') }}">
+                @if($username)
+                    <input type="hidden" name="username" value="{{ $username }}">
+                @else
+                    <div>
+                        <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
+                        <input id="username" name="username" type="text" required
+                            class="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            placeholder="Enter your username" value="{{ old('username') }}">
+                    </div>
+                @endif
 
                 <div>
                     <label for="code" class="block text-sm font-medium text-gray-700">Verification Code</label>
@@ -69,22 +84,34 @@
                 <div class="text-center">
                     <p class="text-sm text-gray-600">
                         Didn't receive the code?
-                        <form method="POST" action="{{ route('auth.resend-verify') }}" class="inline">
-                            @csrf
-                            <input type="hidden" name="username" value="{{ session('username') ?? session('verification_username') }}">
-                            <button type="submit"
-                                class="font-medium text-indigo-600 hover:text-indigo-500">
-                                Resend code
-                            </button>
-                        </form>
+                        @if($username)
+                            <form method="POST" action="{{ route('auth.resend-verify') }}" class="inline">
+                                @csrf
+                                <input type="hidden" name="username" value="{{ $username }}">
+                                <button type="submit"
+                                    class="font-medium text-indigo-600 hover:text-indigo-500">
+                                    Resend code
+                                </button>
+                            </form>
+                        @else
+                            <span class="text-gray-500">Enter your username above to request a new code</span>
+                        @endif
                     </p>
                 </div>
+
+                @if(session('resend_available'))
+                <div class="mt-4 bg-indigo-50 border border-indigo-200 rounded-md p-3">
+                    <p class="text-sm text-indigo-800 text-center">
+                        <strong>Your account is not verified yet.</strong> Please check your email or request a new verification code.
+                    </p>
+                </div>
+                @endif
 
                 @if(config('app.debug'))
                 <div class="mt-4 text-center">
                     <p class="text-xs text-gray-500">
-                        <a href="{{ route('auth.clear-session') }}" class="text-gray-400 hover:text-gray-600">
-                            Clear session and start over
+                        <a href="{{ route('auth.login') }}" class="text-gray-400 hover:text-gray-600">
+                            Back to login
                         </a>
                     </p>
                 </div>

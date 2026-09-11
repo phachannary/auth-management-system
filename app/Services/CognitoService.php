@@ -92,9 +92,22 @@ class CognitoService
             ];
 
         } catch (AwsException $e) {
+            $errorMessage = $e->getAwsErrorMessage();
+            
+            // Check if this is a UserNotConfirmedException
+            if (strpos($errorMessage, 'UserNotConfirmedException') !== false || 
+                strpos($errorMessage, 'User is not confirmed') !== false) {
+                return [
+                    'success' => false,
+                    'error' => 'UserNotConfirmedException',
+                    'error_message' => 'Please verify your email before logging in.',
+                    'username' => $username
+                ];
+            }
+            
             return [
                 'success' => false,
-                'error' => $e->getAwsErrorMessage()
+                'error' => $errorMessage
             ];
         }
     }
