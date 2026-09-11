@@ -26,8 +26,6 @@ class CognitoLoginController extends Controller
     {
         $url = $this->cognitoService->getHostedUIUrl(route('auth.cognito.callback'));
 
-        Log::info('Redirecting to Cognito Hosted UI', ['url' => $url]);
-
         return redirect($url);
     }
 
@@ -58,10 +56,6 @@ class CognitoLoginController extends Controller
     {
         try {
             if ($request->has('error')) {
-                Log::error('Cognito callback error', [
-                    'error' => $request->get('error'),
-                    'description' => $request->get('error_description'),
-                ]);
                 return redirect()->route('auth.login')
                     ->with('error', $request->get('error_description', 'Authentication failed'));
             }

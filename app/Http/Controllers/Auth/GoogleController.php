@@ -28,11 +28,6 @@ class GoogleController extends Controller
     {
         try {
             if (Auth::check()) {
-                Log::info('Google OAuth callback skipped because user is already authenticated', [
-                    'user_id' => Auth::id(),
-                    'redirect' => 'dashboard',
-                ]);
-
                 return redirect()->route('dashboard');
             }
 
@@ -55,7 +50,6 @@ class GoogleController extends Controller
             if ($existingUser && $existingUser->email_verified_at) {
                 // User exists and is verified - log them in directly
                 Auth::login($existingUser);
-                Log::info('Google OAuth: Existing verified user logged in', ['email' => $email]);
                 session()->forget(['auth_state']);
                 return redirect()->route('dashboard')->with('success', 'Welcome back!');
             }
@@ -70,14 +64,10 @@ class GoogleController extends Controller
                 'google_oauth_id' => $googleId,
             ]);
 
-            Log::info('Google OAuth: Checking user status in Cognito', ['email' => $email]);
-
             // Check if user already exists and is confirmed in Cognito
             $statusResult = $this->cognitoService->getUserStatus($username);
 
             if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
-                Log::info('User already confirmed in Cognito, logging in directly', ['email' => $email]);
-
                 // User is already confirmed - create or update local user and log in
                 $user = User::where('email', $email)->first();
 
@@ -89,14 +79,12 @@ class GoogleController extends Controller
                         'email_verified_at' => now(),
                         'password' => bcrypt(Str::random(32)),
                     ]);
-                    Log::info('Created local user for already-confirmed Cognito user', ['email' => $email]);
                 } else {
                     if (!$user->google_id) {
                         $user->google_id = $googleId;
                         $user->email_verified_at = now();
                         $user->save();
                     }
-                    Log::info('Updated existing local user', ['email' => $email]);
                 }
 
                 Auth::login($user);
@@ -107,28 +95,15 @@ class GoogleController extends Controller
             }
 
             // User not confirmed - proceed with verification flow
-            Log::info('User not confirmed, proceeding with verification', ['email' => $email]);
-
             // Create AWS Cognito user (required to send verification code)
             $cognitoCheck = $this->cognitoService->signUp($username, $password, $email);
 
             if (!$cognitoCheck['success']) {
-                Log::info('Cognito signUp skipped (user exists); trying to send fresh OTP', [
-                    'email'    => $email,
-                    'username' => $username,
-                    'error'    => $cognitoCheck['error'] ?? null,
-                ]);
 
                 // User exists in Cognito — try to send a new OTP code
                 $resendResult = $this->cognitoService->resendConfirmationCode($username);
 
                 if (!$resendResult['success']) {
-                    Log::warning('Unable to send OTP after Google OAuth', [
-                        'email'    => $email,
-                        'username' => $username,
-                        'error'    => $resendResult['error'] ?? null,
-                    ]);
-
                     session()->forget(['auth_state']);
                     return redirect()->route('auth.login')
                         ->with('error', 'Unable to send verification code. Please try again or contact support.');
@@ -147,16 +122,10 @@ class GoogleController extends Controller
                 'verification_expires_at'          => $expiresAt,
             ]);
 
-            Log::info('Google OAuth: Redirecting to verification form', [
-                'email' => $email,
-                'username' => $username,
-            ]);
-
             return redirect()->route('auth.verify')
                 ->with('info', 'A verification code has been sent to your Gmail. Please enter the 6-digit code.');
 
         } catch (\Exception $e) {
-            Log::error('Google login error: ' . $e->getMessage());
             session()->forget([
                 'auth_state',
                 'verification_user_id',

@@ -54,8 +54,8 @@ Route::prefix('auth')->name('auth.')->group(function () {
     Route::get('/cognito/callback', [CognitoLoginController::class, 'handleCognitoCallback'])->name('cognito.callback');
 
     // Logout (clears local + Cognito session)
-    Route::post('/logout', [CognitoLoginController::class, 'logout'])->name('logout');
-    Route::get('/logout', [CognitoLoginController::class, 'logout'])->name('logout.get');
+    Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+    Route::get('/logout', [AuthController::class, 'logout'])->name('logout.get');
 });
 
 // Protected Routes

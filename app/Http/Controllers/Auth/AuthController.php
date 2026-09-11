@@ -59,14 +59,28 @@ class AuthController extends Controller
         // Create AWS Cognito user first to get the sub
         $result = $this->cognitoService->signUp($credentials['username'], $credentials['password'], $credentials['email']);
 
-        \Log::info('Registration result: ' . json_encode($result));
-
         if (!$result['success']) {
             return back()->withErrors(['username' => $result['error']]);
         }
 
+        // Check if verification email was sent
+        $codeDeliveryDetails = $result['data']['CodeDeliveryDetails'] ?? null;
+        $userConfirmed = $result['data']['UserConfirmed'] ?? false;
+
+        \Log::info('Registration completed', [
+            'username' => $credentials['username'],
+            'email' => $credentials['email'],
+            'user_confirmed' => $userConfirmed,
+            'code_delivery_details' => $codeDeliveryDetails
+        ]);
+
+        // Store code delivery details in session for user feedback
+        if ($codeDeliveryDetails) {
+            Session::put('code_delivery_details', $codeDeliveryDetails);
+        }
+
         // Create local user (cognito_sub will be added after confirmation)
-        // Store username in 'name' field for login lookup
+        // Store username in 'name' field for consistent username-based login lookup
         $user = User::create([
             'name' => $credentials['username'],
             'email' => $credentials['email'],
@@ -74,16 +88,24 @@ class AuthController extends Controller
             'email_verified_at' => null,
         ]);
 
-        \Log::info('Local user created during registration: ' . $user->email);
+
 
         // Set session data for verification (not flash data)
         Session::put('verification_username', $credentials['username']);
         Session::put('verification_email', $credentials['email']);
         Session::put('verification_expires_at', now()->addMinutes(30));
 
-        return redirect()->route('auth.verify')->with(
-            'success', 'Registration successful! Please check your email for verification code.'
-        );
+        // Provide detailed feedback about verification email
+        $message = 'Registration successful! ';
+        if ($codeDeliveryDetails) {
+            $destination = $codeDeliveryDetails['Destination'] ?? 'your email';
+            $message .= "A verification code has been sent to $destination. ";
+        } else {
+            $message .= 'Please check your email for verification code. ';
+        }
+        $message .= 'If you don\'t receive it within a few minutes, use the resend option.';
+
+        return redirect()->route('auth.verify')->with('success', $message);
     }
 
     public function login(Request $request)
@@ -112,52 +134,70 @@ class AuthController extends Controller
         ]);
 
         // Use username for AWS Cognito (required for email alias configuration)
-        \Log::info('Attempting login with username: ' . $credentials['username']);
         $result = $this->cognitoService->initiateAuth($credentials['username'], $credentials['password']);
-
-        \Log::info('Login result: ' . json_encode($result));
 
         if ($result['success']) {
             // Regenerate session to prevent session fixation
             Session::regenerate();
 
-            // Store tokens in session
-            Session::put('cognito_tokens', $result['data']);
+            // Get the raw Cognito response
+            $cognitoResponse = $result['data']['AuthenticationResult'];
+            
+            // Store tokens in session with flattened structure for consistency
+            Session::put('cognito_tokens', [
+                'access_token' => $cognitoResponse['AccessToken'],
+                'refresh_token' => $cognitoResponse['RefreshToken'],
+                'id_token' => $cognitoResponse['IdToken'],
+                'expires_in' => $cognitoResponse['ExpiresIn'],
+                'token_type' => $cognitoResponse['TokenType'] ?? 'Bearer',
+                'token_received_at' => now()->timestamp,
+            ]);
 
             // Get user details and update with cognito_sub
-            $accessToken = $result['data']['AuthenticationResult']['AccessToken'] ?? null;
-            $idToken = $result['data']['AuthenticationResult']['IdToken'] ?? null;
+            $accessToken = $cognitoResponse['AccessToken'] ?? null;
+            $idToken = $cognitoResponse['IdToken'] ?? null;
 
             if ($accessToken) {
                 $userResult = $this->cognitoService->getUser($accessToken);
                 if ($userResult['success']) {
                     Session::put('user', $userResult['data']);
 
-                    // Update local user with Cognito sub and username
-                    // Search by username (stored in 'name' field) instead of email
+                    // Get Cognito username from the response
                     $cognitoUsername = $userResult['data']['Username'] ?? null;
+                    
+                    // Look up local user using the login username (stored in 'name' field)
+                    // This ensures consistent username-based authentication
                     $localUser = User::where('name', $credentials['username'])->first();
 
-                    if ($localUser && $cognitoUsername) {
-                        $localUser->cognito_username = $cognitoUsername;
+                    if (!$localUser) {
+                        return back()->withErrors(['username' => 'User account not found. Please contact support.']);
+                    }
 
-                        // Extract sub from ID token if available
-                        if ($idToken) {
-                            $tokenValidation = $this->cognitoService->validateIdToken($idToken);
-                            if ($tokenValidation['success']) {
-                                $sub = $tokenValidation['data']['sub'] ?? null;
-                                if ($sub) {
-                                    $localUser->cognito_sub = $sub;
-                                }
+                    // Update local user with Cognito identity information
+                    if ($cognitoUsername) {
+                        $localUser->cognito_username = $cognitoUsername;
+                    }
+
+                    // Extract sub from ID token if available
+                    if ($idToken) {
+                        $tokenValidation = $this->cognitoService->validateIdToken($idToken);
+                        if ($tokenValidation['success']) {
+                            $sub = $tokenValidation['data']['sub'] ?? null;
+                            if ($sub) {
+                                $localUser->cognito_sub = $sub;
                             }
                         }
-
-                        $localUser->save();
                     }
+
+                    $localUser->save();
 
                     // Log in with Laravel Auth
                     Auth::login($localUser);
+                } else {
+                    return back()->withErrors(['username' => 'Authentication failed. Please try again.']);
                 }
+            } else {
+                return back()->withErrors(['username' => 'Authentication failed. Please try again.']);
             }
 
             return redirect()->route('dashboard')->with('success', 'Login successful!');
@@ -209,12 +249,11 @@ class AuthController extends Controller
             'code' => 'required|string|size:6',
         ]);
 
-        \Log::info('Attempting verification for username: ' . $request->username . ' with code: ' . $request->code);
+
 
         // Check if user is already confirmed in Cognito before attempting verification
         $statusResult = $this->cognitoService->getUserStatus($request->username);
         if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
-            \Log::info('User already confirmed in Cognito, skipping verification', ['username' => $request->username]);
 
             // Check if this is a Google OAuth flow
             $googleEmail = session('google_oauth_email');
@@ -231,11 +270,13 @@ class AuthController extends Controller
                         'email_verified_at' => now(),
                         'password' => bcrypt(\Illuminate\Support\Str::random(32)),
                     ]);
+
                 } else {
                     if (!$user->google_id) {
                         $user->google_id = $googleId;
                         $user->email_verified_at = now();
                         $user->save();
+
                     }
                 }
 
@@ -260,11 +301,13 @@ class AuthController extends Controller
                         'email_verified_at' => now(),
                         'password' => bcrypt(\Illuminate\Support\Str::random(32)),
                     ]);
+
                 } else {
                     if (!$user->facebook_id) {
                         $user->facebook_id = $facebookId;
                         $user->email_verified_at = now();
                         $user->save();
+
                     }
                 }
 
@@ -284,10 +327,10 @@ class AuthController extends Controller
             $request->code
         );
 
-        \Log::info('Verification result: ' . json_encode($result));
+
 
         if ($result['success']) {
-            \Log::info('Verification successful for: ' . $request->username);
+
 
             // Check if this is a Google OAuth flow
             $googleEmail = session('google_oauth_email');
@@ -304,11 +347,13 @@ class AuthController extends Controller
                         'email_verified_at' => now(),
                         'password' => bcrypt(\Illuminate\Support\Str::random(32)),
                     ]);
+
                 } else {
                     if (!$user->google_id) {
                         $user->google_id = $googleId;
                         $user->email_verified_at = now();
                         $user->save();
+
                     }
                 }
 
@@ -333,11 +378,13 @@ class AuthController extends Controller
                         'email_verified_at' => now(),
                         'password' => bcrypt(\Illuminate\Support\Str::random(32)),
                     ]);
+
                 } else {
                     if (!$user->facebook_id) {
                         $user->facebook_id = $facebookId;
                         $user->email_verified_at = now();
                         $user->save();
+
                     }
                 }
 
@@ -347,14 +394,20 @@ class AuthController extends Controller
                 return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }
 
-            // Regular signup flow - redirect to login
+            // Regular signup flow - update local user and redirect to login
+            $localUser = User::where('name', $request->username)->first();
+            if ($localUser) {
+                $localUser->email_verified_at = now();
+                $localUser->save();
+            }
+
             Session::forget(['username', 'verification_username']);
 
             return redirect()->route('auth.login')
                 ->with('success', 'Account verified! You can now login.')
                 ->with('verified_username', $request->username);
         } else {
-            \Log::error('Verification failed: ' . $result['error']);
+
 
             // Provide more specific error messages
             $errorMessage = $result['error'];
@@ -381,8 +434,28 @@ class AuthController extends Controller
         $result = $this->cognitoService->resendConfirmationCode($request->username);
 
         if ($result['success']) {
-            return back()->with('success', 'Verification code sent! Check your email.');
+            $codeDeliveryDetails = $result['data']['CodeDeliveryDetails'] ?? null;
+            $message = 'Verification code resent! ';
+
+            if ($codeDeliveryDetails) {
+                $destination = $codeDeliveryDetails['Destination'] ?? 'your email';
+                $message .= "Check $destination for the new code.";
+                Session::put('code_delivery_details', $codeDeliveryDetails);
+            } else {
+                $message .= 'Please check your email.';
+            }
+
+            \Log::info('Verification code resent', [
+                'username' => $request->username,
+                'code_delivery_details' => $codeDeliveryDetails
+            ]);
+
+            return back()->with('success', $message);
         } else {
+            \Log::error('Failed to resend verification code', [
+                'username' => $request->username,
+                'error' => $result['error']
+            ]);
             return back()->withErrors(['username' => $result['error']]);
         }
     }
@@ -404,17 +477,22 @@ class AuthController extends Controller
         $tokens = Session::get('cognito_tokens');
 
         if ($tokens && isset($tokens['refresh_token'])) {
-            $result = $this->cognitoService->refreshToken($tokens['refresh_token']);
+            // Get username from authenticated user for SECRET_HASH calculation
+            $username = Auth::check() ? Auth::user()->name : null;
+            
+            $result = $this->cognitoService->refreshToken($tokens['refresh_token'], $username);
 
             if ($result['success']) {
                 $authResult = $result['data']['AuthenticationResult'];
 
-                // Update tokens in session
+                // Update tokens in session with flattened structure
+                // (Cognito may return a new refresh token if token rotation is enabled)
                 Session::put('cognito_tokens', [
                     'access_token' => $authResult['AccessToken'],
-                    'refresh_token' => $tokens['refresh_token'],
+                    'refresh_token' => $authResult['RefreshToken'] ?? $tokens['refresh_token'],
                     'id_token' => $authResult['IdToken'],
                     'expires_in' => $authResult['ExpiresIn'],
+                    'token_type' => $authResult['TokenType'] ?? 'Bearer',
                     'token_received_at' => now()->timestamp,
                 ]);
 
@@ -423,5 +501,23 @@ class AuthController extends Controller
         }
 
         return response()->json(['success' => false, 'message' => 'Token refresh failed']);
+    }
+
+    public function logout()
+    {
+        $tokens = Session::get('cognito_tokens');
+
+        // Revoke tokens in Cognito if access token is available
+        if ($tokens && isset($tokens['access_token'])) {
+            $this->cognitoService->globalSignOut($tokens['access_token']);
+        }
+
+        // Clear local session
+        Session::forget(['cognito_tokens', 'user']);
+        Auth::logout();
+        Session::invalidate();
+        Session::regenerateToken();
+
+        return redirect()->route('auth.login')->with('success', 'You have been logged out.');
     }
 }

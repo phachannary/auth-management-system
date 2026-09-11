@@ -122,13 +122,30 @@ class CognitoService
             }
 
             $result = $this->client->signUp($params);
+            $resultArray = $result->toArray();
+
+            // Log the SignUp response for debugging
+            \Log::info('Cognito SignUp response', [
+                'username' => $username,
+                'email' => $email,
+                'UserConfirmed' => $resultArray['UserConfirmed'] ?? false,
+                'CodeDeliveryDetails' => $resultArray['CodeDeliveryDetails'] ?? null,
+                'full_response' => $resultArray
+            ]);
 
             return [
                 'success' => true,
-                'data' => $result->toArray()
+                'data' => $resultArray
             ];
 
         } catch (AwsException $e) {
+            \Log::error('Cognito SignUp error', [
+                'username' => $username,
+                'email' => $email,
+                'error' => $e->getAwsErrorMessage(),
+                'exception' => $e->getMessage()
+            ]);
+
             return [
                 'success' => false,
                 'error' => $e->getAwsErrorMessage()
@@ -142,8 +159,6 @@ class CognitoService
     public function confirmSignUp($username, $code)
     {
         try {
-            \Log::info("Cognito confirmSignUp - Username: $username, Code: $code, ClientId: $this->clientId");
-
             $params = [
                 'ClientId' => $this->clientId,
                 'Username' => $username,
@@ -153,14 +168,9 @@ class CognitoService
             // IMPORTANT: add SecretHash if you use client secret
             if (!empty($this->clientSecret)) {
                 $params['SecretHash'] = $this->calculateSecretHash($username);
-                \Log::info("SecretHash added for username: $username");
             }
 
-            \Log::info("Calling confirmSignUp with params: " . json_encode($params));
-
             $result = $this->client->confirmSignUp($params);
-
-            \Log::info("confirmSignUp successful for username: $username");
 
             return [
                 'success' => true,
@@ -168,14 +178,11 @@ class CognitoService
             ];
 
         } catch (AwsException $e) {
-            \Log::error("confirmSignUp failed for username: $username - " . $e->getAwsErrorMessage());
-            \Log::error("AWS Error Code: " . $e->getAwsErrorCode());
             return [
                 'success' => false,
                 'error' => $e->getAwsErrorMessage(),
             ];
         } catch (\Exception $e) {
-            \Log::error("confirmSignUp exception for username: $username - " . $e->getMessage());
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
@@ -225,13 +232,27 @@ class CognitoService
             }
 
             $result = $this->client->resendConfirmationCode($params);
+            $resultArray = $result->toArray();
+
+            // Log the resend response for debugging
+            \Log::info('Cognito resendConfirmationCode response', [
+                'username' => $username,
+                'CodeDeliveryDetails' => $resultArray['CodeDeliveryDetails'] ?? null,
+                'full_response' => $resultArray
+            ]);
 
             return [
                 'success' => true,
-                'data' => $result->toArray()
+                'data' => $resultArray
             ];
 
         } catch (AwsException $e) {
+            \Log::error('Cognito resendConfirmationCode error', [
+                'username' => $username,
+                'error' => $e->getAwsErrorMessage(),
+                'exception' => $e->getMessage()
+            ]);
+
             return [
                 'success' => false,
                 'error' => $e->getAwsErrorMessage()
@@ -265,16 +286,23 @@ class CognitoService
     /* ---------------------------
      | REFRESH TOKEN
     ----------------------------*/
-    public function refreshToken($refreshToken)
+    public function refreshToken($refreshToken, $username = null)
     {
         try {
-            $result = $this->client->initiateAuth([
+            $params = [
                 'AuthFlow' => 'REFRESH_TOKEN_AUTH',
                 'ClientId' => $this->clientId,
                 'AuthParameters' => [
                     'REFRESH_TOKEN' => $refreshToken,
                 ],
-            ]);
+            ];
+
+            // Add SECRET_HASH if using app client secret
+            if (!empty($this->clientSecret) && $username) {
+                $params['AuthParameters']['SECRET_HASH'] = $this->calculateSecretHash($username);
+            }
+
+            $result = $this->client->initiateAuth($params);
 
             return [
                 'success' => true,
@@ -350,10 +378,6 @@ class CognitoService
             $response = Http::asForm()->post($url, $params);
 
             if (!$response->successful()) {
-                \Log::error('Token exchange failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                ]);
                 return [
                     'success' => false,
                     'error' => 'Token exchange failed: ' . $response->body(),
@@ -386,7 +410,6 @@ class CognitoService
             return ['success' => true];
 
         } catch (AwsException $e) {
-            \Log::error('Global sign out failed: ' . $e->getAwsErrorMessage());
             return [
                 'success' => false,
                 'error' => $e->getAwsErrorMessage(),
@@ -443,7 +466,6 @@ class CognitoService
             ];
 
         } catch (\Exception $e) {
-            \Log::error('ID token validation failed: ' . $e->getMessage());
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
@@ -479,7 +501,6 @@ class CognitoService
             ];
 
         } catch (\Exception $e) {
-            \Log::error('Access token validation failed: ' . $e->getMessage());
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
