@@ -60,6 +60,46 @@ class AuthController extends Controller
         $result = $this->cognitoService->signUp($credentials['username'], $credentials['password'], $credentials['email']);
 
         if (!$result['success']) {
+            // Handle case where user already exists in Cognito
+            if (strpos($result['error'], 'User already exists') !== false || strpos($result['error'], 'UsernameExistsException') !== false) {
+                // User exists - try to resend verification code
+                $resendResult = $this->cognitoService->resendConfirmationCode($credentials['username']);
+                
+                if ($resendResult['success']) {
+                    $codeDeliveryDetails = $resendResult['data']['CodeDeliveryDetails'] ?? null;
+                    
+                    // Create local user if doesn't exist
+                    $user = User::where('name', $credentials['username'])->first();
+                    if (!$user) {
+                        $user = User::create([
+                            'name' => $credentials['username'],
+                            'email' => $credentials['email'],
+                            'password' => bcrypt($credentials['password']),
+                            'email_verified_at' => null,
+                        ]);
+                    }
+                    
+                    // Set session data for verification
+                    Session::put('verification_username', $credentials['username']);
+                    Session::put('verification_email', $credentials['email']);
+                    Session::put('verification_expires_at', now()->addMinutes(30));
+                    
+                    if ($codeDeliveryDetails) {
+                        Session::put('code_delivery_details', $codeDeliveryDetails);
+                    }
+                    
+                    $message = 'Account already exists. A new verification code has been sent to your email. ';
+                    if ($codeDeliveryDetails) {
+                        $destination = $codeDeliveryDetails['Destination'] ?? 'your email';
+                        $message .= "Check $destination for the code.";
+                    }
+                    
+                    return redirect()->route('auth.verify')->with('success', $message);
+                } else {
+                    return back()->withErrors(['username' => 'Unable to send verification code. Please try again or contact support.']);
+                }
+            }
+            
             return back()->withErrors(['username' => $result['error']]);
         }
 
@@ -78,17 +118,6 @@ class AuthController extends Controller
         if ($codeDeliveryDetails) {
             Session::put('code_delivery_details', $codeDeliveryDetails);
         }
-
-        // Create local user (cognito_sub will be added after confirmation)
-        // Store username in 'name' field for consistent username-based login lookup
-        $user = User::create([
-            'name' => $credentials['username'],
-            'email' => $credentials['email'],
-            'password' => bcrypt($credentials['password']),
-            'email_verified_at' => null,
-        ]);
-
-
 
         // Set session data for verification (not flash data)
         Session::put('verification_username', $credentials['username']);
