@@ -56,31 +56,40 @@ class AuthController extends Controller
             'terms' => 'required|accepted',
         ]);
 
+        // Check if email already exists in local database (exclude Google/Facebook OAuth users)
+        $existingUser = User::where('email', $credentials['email'])->first();
+        if ($existingUser && !$existingUser->google_id && !$existingUser->facebook_id) {
+            return back()->withErrors(['email' => 'This email is already registered. Please login or use a different email.']);
+        }
+
         // Create AWS Cognito user first to get the sub
-        $result = $this->cognitoService->signUp($credentials['username'], $credentials['password'], $credentials['email']);
+        // Use email prefix as Cognito username (like Google OAuth does)
+        $cognitoUsername = strtolower(explode('@', $credentials['email'])[0]);
+        $result = $this->cognitoService->signUp($cognitoUsername, $credentials['password'], $credentials['email']);
 
         if (!$result['success']) {
             // Handle case where user already exists in Cognito
             if (strpos($result['error'], 'User already exists') !== false || strpos($result['error'], 'UsernameExistsException') !== false) {
                 // User exists - try to resend verification code
-                $resendResult = $this->cognitoService->resendConfirmationCode($credentials['username']);
+                $resendResult = $this->cognitoService->resendConfirmationCode($cognitoUsername);
                 
                 if ($resendResult['success']) {
                     $codeDeliveryDetails = $resendResult['data']['CodeDeliveryDetails'] ?? null;
                     
-                    // Create local user if doesn't exist
-                    $user = User::where('name', $credentials['username'])->first();
+                    // Create local user if doesn't exist (check by email, not just name)
+                    $user = User::where('email', $credentials['email'])->first();
                     if (!$user) {
                         $user = User::create([
                             'name' => $credentials['username'],
                             'email' => $credentials['email'],
                             'password' => bcrypt($credentials['password']),
                             'email_verified_at' => null,
+                            'cognito_username' => $cognitoUsername,
                         ]);
                     }
                     
                     // Set session data for verification
-                    Session::put('verification_username', $credentials['username']);
+                    Session::put('verification_username', $cognitoUsername);
                     Session::put('verification_email', $credentials['email']);
                     Session::put('verification_expires_at', now()->addMinutes(30));
                     
@@ -109,10 +118,23 @@ class AuthController extends Controller
 
         \Log::info('Registration completed', [
             'username' => $credentials['username'],
+            'cognito_username' => $cognitoUsername,
             'email' => $credentials['email'],
             'user_confirmed' => $userConfirmed,
             'code_delivery_details' => $codeDeliveryDetails
         ]);
+
+        // Create local user after successful Cognito SignUp (double-check email doesn't exist)
+        $user = User::where('email', $credentials['email'])->first();
+        if (!$user) {
+            $user = User::create([
+                'name' => $credentials['username'],
+                'email' => $credentials['email'],
+                'password' => bcrypt($credentials['password']),
+                'email_verified_at' => null,
+                'cognito_username' => $cognitoUsername,
+            ]);
+        }
 
         // Store code delivery details in session for user feedback
         if ($codeDeliveryDetails) {
@@ -120,7 +142,7 @@ class AuthController extends Controller
         }
 
         // Set session data for verification (not flash data)
-        Session::put('verification_username', $credentials['username']);
+        Session::put('verification_username', $cognitoUsername);
         Session::put('verification_email', $credentials['email']);
         Session::put('verification_expires_at', now()->addMinutes(30));
 
@@ -251,6 +273,22 @@ class AuthController extends Controller
         // Allow username from session or from old input (after failed verification)
         $username = session('username') ?: session('verification_username') ?: old('username');
         
+        // Check if verification session has expired
+        $expiresAt = session('verification_expires_at');
+        if ($expiresAt && now()->gt($expiresAt)) {
+            Session::forget([
+                'username',
+                'verification_username',
+                'verification_email',
+                'verification_expires_at',
+                'verification_otp_session_id',
+                'verification_code_sent_at',
+                'verification_already_confirmed',
+            ]);
+            return redirect()->route('auth.login')
+                ->with('error', 'Your verification session has expired. Please register again or request a new verification code.');
+        }
+        
         // Don't redirect if no username - allow manual entry for unconfirmed users
         // who are redirected from login
 
@@ -283,7 +321,8 @@ class AuthController extends Controller
 
         return view('auth.verify', [
             'username' => $username,
-            'resend_available' => session('resend_available')
+            'resend_available' => session('resend_available'),
+            'verification_email' => session('verification_email')
         ]);
     }
 
@@ -365,7 +404,14 @@ class AuthController extends Controller
                 return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }
 
-            // Regular registration flow - just redirect to login
+            // Regular registration flow - update local user and redirect to login
+            $verificationEmail = session('verification_email');
+            $localUser = User::where('email', $verificationEmail)->first();
+            if ($localUser) {
+                $localUser->email_verified_at = now();
+                $localUser->save();
+            }
+            
             Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
             return redirect()->route('auth.login')->with('success', 'Your account is already verified. Please login.');
         }
@@ -375,11 +421,7 @@ class AuthController extends Controller
             $request->code
         );
 
-
-
         if ($result['success']) {
-
-
             // Check if this is a Google OAuth flow
             $googleEmail = session('google_oauth_email');
             if ($googleEmail) {
@@ -443,13 +485,15 @@ class AuthController extends Controller
             }
 
             // Regular signup flow - update local user and redirect to login
-            $localUser = User::where('name', $request->username)->first();
+            // Look up by email to ensure we find the correct user
+            $verificationEmail = session('verification_email');
+            $localUser = User::where('email', $verificationEmail)->first();
             if ($localUser) {
                 $localUser->email_verified_at = now();
                 $localUser->save();
             }
 
-            Session::forget(['username', 'verification_username']);
+            Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
 
             return redirect()->route('auth.login')
                 ->with('success', 'Account verified! You can now login.')
@@ -493,8 +537,12 @@ class AuthController extends Controller
                 $message .= 'Please check your email.';
             }
 
+            // Update session expiry time
+            Session::put('verification_expires_at', now()->addMinutes(30));
+
             \Log::info('Verification code resent', [
                 'username' => $request->username,
+                'verification_email' => session('verification_email'),
                 'code_delivery_details' => $codeDeliveryDetails
             ]);
 
@@ -502,6 +550,7 @@ class AuthController extends Controller
         } else {
             \Log::error('Failed to resend verification code', [
                 'username' => $request->username,
+                'verification_email' => session('verification_email'),
                 'error' => $result['error']
             ]);
             return back()->withErrors(['username' => $result['error']]);

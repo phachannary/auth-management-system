@@ -16,6 +16,11 @@
                 <p class="mt-2 text-center text-sm text-gray-600">
                     We've sent a verification code to your email address.
                 </p>
+                @if(session('verification_email'))
+                    <p class="mt-1 text-center text-xs text-gray-500">
+                        Email: {{ session('verification_email') }}
+                    </p>
+                @endif
                 @if(session('code_delivery_details'))
                     <p class="mt-1 text-center text-xs text-gray-500">
                         Code sent to: {{ session('code_delivery_details')['Destination'] ?? 'your email' }}
@@ -50,6 +55,13 @@
 
                 @if($username)
                     <input type="hidden" name="username" value="{{ $username }}">
+                    @if($verification_email)
+                        <div class="bg-gray-50 border border-gray-200 rounded-md p-3">
+                            <p class="text-sm text-gray-600 text-center">
+                                <strong>Verifying email:</strong> {{ $verification_email }}
+                            </p>
+                        </div>
+                    @endif
                 @else
                     <div>
                         <label for="username" class="block text-sm font-medium text-gray-700">Username</label>
