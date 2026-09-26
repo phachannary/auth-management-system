@@ -273,9 +273,11 @@ class AuthController extends Controller
         // Allow username from session or from old input (after failed verification)
         $username = session('username') ?: session('verification_username') ?: old('username');
         
-        // Check if verification session has expired
+        // Check if verification session has expired (only for regular registration, not OAuth)
         $expiresAt = session('verification_expires_at');
-        if ($expiresAt && now()->gt($expiresAt)) {
+        $isOAuthFlow = session('google_oauth_email') || session('facebook_oauth_email');
+        
+        if ($expiresAt && now()->gt($expiresAt) && !$isOAuthFlow) {
             Session::forget([
                 'username',
                 'verification_username',
@@ -404,14 +406,13 @@ class AuthController extends Controller
                 return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }
 
-            // Regular registration flow - update local user and redirect to login
-            $verificationEmail = session('verification_email');
-            $localUser = User::where('email', $verificationEmail)->first();
+            // Regular signup flow - update local user and redirect to login
+            $localUser = User::where('name', $request->username)->first();
             if ($localUser) {
                 $localUser->email_verified_at = now();
                 $localUser->save();
             }
-            
+
             Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
             return redirect()->route('auth.login')->with('success', 'Your account is already verified. Please login.');
         }
@@ -485,9 +486,7 @@ class AuthController extends Controller
             }
 
             // Regular signup flow - update local user and redirect to login
-            // Look up by email to ensure we find the correct user
-            $verificationEmail = session('verification_email');
-            $localUser = User::where('email', $verificationEmail)->first();
+            $localUser = User::where('name', $request->username)->first();
             if ($localUser) {
                 $localUser->email_verified_at = now();
                 $localUser->save();
