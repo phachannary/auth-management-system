@@ -98,23 +98,12 @@ class JwtService
 
     public function getJwks(): array
     {
-        // For HS256, we don't use JWKS. Return a simple response indicating HS256.
-        // Clients should use the shared secret for validation.
+        // HS256 is symmetric: the signing secret is the only key, so it must never
+        // be published. Return an empty key set until we move to an asymmetric
+        // algorithm (RS256) whose public key can be safely exposed here.
+        // Clients should validate tokens via /api/oauth/userinfo instead.
         return [
-            'keys' => [
-                [
-                    'kty' => 'oct',
-                    'alg' => 'HS256',
-                    'use' => 'sig',
-                    'kid' => 'oauth-key-1',
-                    'k' => $this->base64UrlEncode($this->secretKey),
-                ]
-            ]
+            'keys' => [],
         ];
-    }
-
-    private function base64UrlEncode(string $data): string
-    {
-        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
     }
 }

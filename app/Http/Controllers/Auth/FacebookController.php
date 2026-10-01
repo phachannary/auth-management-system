@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\CognitoService;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Session;
 
 class FacebookController extends Controller
 {

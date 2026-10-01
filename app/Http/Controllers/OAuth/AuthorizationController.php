@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 
@@ -16,18 +17,15 @@ class AuthorizationController extends Controller
 {
     public function handleAuthorize(Request $request)
     {
-        $request->validate([
-            'client_id' => 'required|string',
-            'redirect_uri' => 'required|string',
-            'response_type' => 'required|in:code',
-            'scope' => 'nullable|string',
-            'state' => 'nullable|string',
-        ]);
-
         $clientId = $request->input('client_id');
         $redirectUri = $request->input('redirect_uri');
-        $scope = $request->input('scope', 'openid profile email');
-        $state = $request->input('state');
+
+        // Until both client_id and redirect_uri are verified, never redirect to
+        // redirect_uri - show an error page instead (RFC 6749 §4.1.2.1).
+        // Otherwise this endpoint can be used as an open redirect.
+        if (!is_string($clientId) || $clientId === '') {
+            return $this->errorPage('invalid_request', 'The client_id parameter is missing.');
+        }
 
         // Find the OAuth client
         $client = OAuthClient::where('client_id', $clientId)
@@ -35,14 +33,29 @@ class AuthorizationController extends Controller
             ->first();
 
         if (!$client) {
-            return $this->errorRedirect($redirectUri, 'invalid_client', 'Invalid client_id', $state);
+            return $this->errorPage('invalid_client', 'Unknown or inactive client_id.');
         }
 
         // Validate redirect URI
-        $allowedUris = $client->redirect_uris;
-        if (!$this->isValidRedirectUri($redirectUri, $allowedUris)) {
-            return $this->errorRedirect($redirectUri, 'invalid_redirect_uri', 'Invalid redirect_uri', $state);
+        if (!is_string($redirectUri) || !$this->isValidRedirectUri($redirectUri, $client->redirect_uris ?? [])) {
+            return $this->errorPage('invalid_request', 'The redirect_uri is missing or not registered for this client.');
         }
+
+        // redirect_uri is now trusted, so remaining errors are returned to the client
+        $validator = Validator::make($request->all(), [
+            'response_type' => 'required|in:code',
+            'scope' => 'nullable|string',
+            'state' => 'nullable|string',
+        ]);
+
+        $state = is_string($request->input('state')) ? $request->input('state') : null;
+
+        if ($validator->fails()) {
+            $error = $validator->errors()->has('response_type') ? 'unsupported_response_type' : 'invalid_request';
+            return $this->errorRedirect($redirectUri, $error, $validator->errors()->first(), $state);
+        }
+
+        $scope = $request->input('scope') ?: 'openid profile email';
 
         // Check if user is already logged in
         if (Auth::check()) {
@@ -91,7 +104,7 @@ class AuthorizationController extends Controller
             $params['state'] = $state;
         }
 
-        return Redirect::to($redirectUri . '?' . http_build_query($params));
+        return Redirect::to($this->appendQuery($redirectUri, $params));
     }
 
     private function isValidRedirectUri(string $uri, array $allowedUris): bool
@@ -106,20 +119,25 @@ class AuthorizationController extends Controller
 
     private function urisMatch(string $uri, string $pattern): bool
     {
-        // Exact match
-        if ($uri === $pattern) {
-            return true;
-        }
-
-        // Wildcard match (e.g., https://example.com/*)
-        if (str_ends_with($pattern, '*')) {
-            $prefix = substr($pattern, 0, -1);
-            return str_starts_with($uri, $prefix);
-        }
-
-        return false;
+        // Exact match only. Prefix/wildcard matching allows lookalike hosts
+        // (e.g. https://ds1.example.com.evil.com) to pass validation.
+        return $uri === $pattern;
     }
 
+    /**
+     * Error shown to the user when the client or redirect_uri cannot be trusted.
+     */
+    private function errorPage(string $error, string $description)
+    {
+        return response()->view('oauth.error', [
+            'error' => $error,
+            'error_description' => $description,
+        ], 400);
+    }
+
+    /**
+     * Error returned to the client. Only call after redirect_uri has been validated.
+     */
     private function errorRedirect(string $redirectUri, string $error, string $description, ?string $state)
     {
         $params = [
@@ -131,6 +149,13 @@ class AuthorizationController extends Controller
             $params['state'] = $state;
         }
 
-        return Redirect::to($redirectUri . '?' . http_build_query($params));
+        return Redirect::to($this->appendQuery($redirectUri, $params));
+    }
+
+    private function appendQuery(string $uri, array $params): string
+    {
+        $separator = str_contains($uri, '?') ? '&' : '?';
+
+        return $uri . $separator . http_build_query($params);
     }
 }

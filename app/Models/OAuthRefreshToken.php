@@ -9,6 +9,8 @@ class OAuthRefreshToken extends Model
 {
     use HasFactory;
 
+    protected $table = 'oauth_refresh_tokens';
+
     protected $fillable = [
         'user_id',
         'client_id',

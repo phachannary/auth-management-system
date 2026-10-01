@@ -9,6 +9,8 @@ class OAuthAccessToken extends Model
 {
     use HasFactory;
 
+    protected $table = 'oauth_access_tokens';
+
     protected $fillable = [
         'user_id',
         'client_id',
@@ -31,6 +33,6 @@ class OAuthAccessToken extends Model
 
     public function refreshToken()
     {
-        return $this->hasOne(OAuthRefreshToken::class);
+        return $this->hasOne(OAuthRefreshToken::class, 'access_token_id');
     }
 }

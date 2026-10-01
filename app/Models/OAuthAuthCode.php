@@ -9,6 +9,8 @@ class OAuthAuthCode extends Model
 {
     use HasFactory;
 
+    protected $table = 'oauth_auth_codes';
+
     protected $fillable = [
         'user_id',
         'client_id',
