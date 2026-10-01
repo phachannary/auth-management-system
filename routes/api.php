@@ -5,6 +5,10 @@ use App\Http\Controllers\Api\UserApiController;
 use App\Http\Controllers\Api\AppApiController;
 use App\Http\Controllers\Api\RoleApiController;
 use App\Http\Controllers\Api\PermissionApiController;
+use App\Http\Controllers\OAuth\TokenController;
+use App\Http\Controllers\OAuth\UserInfoController;
+use App\Http\Controllers\OAuth\JwksController;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -14,6 +18,32 @@ use Illuminate\Support\Facades\Route;
  * Apps authenticate directly with Cognito, then send
  * the Cognito JWT to these endpoints.
  */
+
+// OAuth 2.0 / OIDC Endpoints (no authentication required for token endpoint)
+Route::prefix('oauth')->group(function () {
+    // Token endpoint (authorization code grant, refresh token grant)
+    Route::post('/token', [TokenController::class, 'token']);
+    
+    // UserInfo endpoint (requires OAuth access token)
+    Route::get('/userinfo', [UserInfoController::class, 'userinfo']);
+    
+    // JWKS endpoint (public keys for JWT validation)
+    Route::get('/.well-known/jwks.json', [JwksController::class, 'jwks']);
+});
+
+// OAuth 2.0 Protected API Routes (requires OAuth access token)
+Route::middleware(['oauth.token'])->group(function () {
+    Route::get('/oauth/test', function (Request $request) {
+        return response()->json([
+            'message' => 'OAuth token is valid!',
+            'user_id' => $request->attributes->get('oauth_user_id'),
+            'email' => $request->attributes->get('oauth_email'),
+            'name' => $request->attributes->get('oauth_name'),
+            'client_id' => $request->attributes->get('oauth_client_id'),
+        ]);
+    });
+});
+
 Route::middleware(['cognito.token'])->group(function () {
 
     Route::prefix('auth')->group(function () {

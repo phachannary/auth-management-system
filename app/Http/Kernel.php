@@ -64,6 +64,7 @@ class Kernel extends HttpKernel
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Http\Middleware\EnsureEmailIsVerified::class,
         'cognito.token' => \App\Http\Middleware\VerifyCognitoToken::class,
+        'oauth.token' => \App\Http\Middleware\VerifyOAuthToken::class,
         'role' => \App\Http\Middleware\CheckRoleForApp::class,
         'permission' => \App\Http\Middleware\CheckPermissionForApp::class,
     ];

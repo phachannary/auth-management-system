@@ -55,6 +55,18 @@ class FacebookController extends Controller
                 // User exists and is verified - log them in directly
                 Auth::login($existingUser);
                 Session::regenerate();
+
+                // Check if this is an OAuth flow
+                if (session('oauth_request')) {
+                    return redirect()->route('oauth.authorize', [
+                        'client_id' => session('oauth_request')['client_id'],
+                        'redirect_uri' => session('oauth_request')['redirect_uri'],
+                        'response_type' => 'code',
+                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                        'state' => session('oauth_request')['state'] ?? null,
+                    ]);
+                }
+
                 return redirect()->route('dashboard')->with('success', 'Welcome back!');
             }
 

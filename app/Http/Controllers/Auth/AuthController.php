@@ -251,6 +251,17 @@ class AuthController extends Controller
                 return back()->withErrors(['username' => 'Authentication failed. Please try again.']);
             }
 
+            // Check if this is an OAuth flow
+            if (session('oauth_request')) {
+                return redirect()->route('oauth.authorize', [
+                    'client_id' => session('oauth_request')['client_id'],
+                    'redirect_uri' => session('oauth_request')['redirect_uri'],
+                    'response_type' => 'code',
+                    'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                    'state' => session('oauth_request')['state'] ?? null,
+                ]);
+            }
+
             return redirect()->route('dashboard')->with('success', 'Login successful!');
         } else {
             // Handle UserNotConfirmedException specifically
@@ -372,6 +383,17 @@ class AuthController extends Controller
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
 
+                // Check if this is an OAuth flow
+                if (session('oauth_request')) {
+                    return redirect()->route('oauth.authorize', [
+                        'client_id' => session('oauth_request')['client_id'],
+                        'redirect_uri' => session('oauth_request')['redirect_uri'],
+                        'response_type' => 'code',
+                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                        'state' => session('oauth_request')['state'] ?? null,
+                    ]);
+                }
+
                 return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }
 
@@ -402,6 +424,17 @@ class AuthController extends Controller
 
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
+
+                // Check if this is an OAuth flow
+                if (session('oauth_request')) {
+                    return redirect()->route('oauth.authorize', [
+                        'client_id' => session('oauth_request')['client_id'],
+                        'redirect_uri' => session('oauth_request')['redirect_uri'],
+                        'response_type' => 'code',
+                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                        'state' => session('oauth_request')['state'] ?? null,
+                    ]);
+                }
 
                 return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }
@@ -451,6 +484,17 @@ class AuthController extends Controller
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
 
+                // Check if this is an OAuth flow
+                if (session('oauth_request')) {
+                    return redirect()->route('oauth.authorize', [
+                        'client_id' => session('oauth_request')['client_id'],
+                        'redirect_uri' => session('oauth_request')['redirect_uri'],
+                        'response_type' => 'code',
+                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                        'state' => session('oauth_request')['state'] ?? null,
+                    ]);
+                }
+
                 return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }
 
@@ -481,6 +525,17 @@ class AuthController extends Controller
 
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
+
+                // Check if this is an OAuth flow
+                if (session('oauth_request')) {
+                    return redirect()->route('oauth.authorize', [
+                        'client_id' => session('oauth_request')['client_id'],
+                        'redirect_uri' => session('oauth_request')['redirect_uri'],
+                        'response_type' => 'code',
+                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                        'state' => session('oauth_request')['state'] ?? null,
+                    ]);
+                }
 
                 return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }

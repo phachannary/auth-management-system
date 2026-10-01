@@ -6,6 +6,8 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\CognitoLoginController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Auth\FacebookController;
+use App\Http\Controllers\OAuth\AuthorizationController;
+use App\Http\Controllers\OAuth\OAuthLoginController;
 
 /*
 |--------------------------------------------------------------------------
@@ -56,6 +58,15 @@ Route::prefix('auth')->name('auth.')->group(function () {
     // Logout (clears local + Cognito session)
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/logout', [AuthController::class, 'logout'])->name('logout.get');
+});
+
+// OAuth 2.0 / OIDC Routes
+Route::prefix('oauth')->name('oauth.')->group(function () {
+    // Authorization endpoint
+    Route::get('/authorize', [AuthorizationController::class, 'handleAuthorize'])->name('authorize');
+    
+    // OAuth login page (shown when user is not logged in)
+    Route::get('/login', [OAuthLoginController::class, 'showLoginForm'])->name('login');
 });
 
 // Protected Routes
