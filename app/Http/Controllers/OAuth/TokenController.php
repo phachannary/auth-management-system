@@ -10,6 +10,7 @@ use App\Models\OAuthRefreshToken;
 use App\Models\User;
 use App\Services\JwtService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -208,10 +209,29 @@ class TokenController extends Controller
             ], 400);
         }
 
-        // Revoke old tokens
-        $refreshTokenRecord->accessToken->update(['revoked' => true]);
-        $refreshTokenRecord->update(['revoked' => true]);
+        // Rotate atomically: revoking and re-issuing happen together, and the
+        // conditional update ensures a refresh token can only be used once even
+        // under concurrent requests.
+        return DB::transaction(function () use ($refreshTokenRecord, $user, $clientId) {
+            $claimed = OAuthRefreshToken::whereKey($refreshTokenRecord->id)
+                ->where('revoked', false)
+                ->update(['revoked' => true]);
 
+            if ($claimed === 0) {
+                return response()->json([
+                    'error' => 'invalid_grant',
+                    'error_description' => 'Invalid refresh token',
+                ], 400);
+            }
+
+            OAuthAccessToken::whereKey($refreshTokenRecord->access_token_id)->update(['revoked' => true]);
+
+            return $this->issueRefreshedTokens($refreshTokenRecord, $user, $clientId);
+        });
+    }
+
+    private function issueRefreshedTokens(OAuthRefreshToken $refreshTokenRecord, User $user, string $clientId)
+    {
         // Generate new tokens
         $newAccessToken = $this->jwtService->generateAccessToken([
             'sub' => (string) $user->id,

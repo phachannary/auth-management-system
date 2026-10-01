@@ -15,6 +15,12 @@ use Illuminate\Support\Facades\Log;
 
 class AuthorizationController extends Controller
 {
+    /**
+     * How long a pending OAuth request survives while the user logs in
+     * (password, Google/Facebook, or OTP verification).
+     */
+    public const PENDING_REQUEST_TTL_MINUTES = 15;
+
     public function handleAuthorize(Request $request)
     {
         $clientId = $request->input('client_id');
@@ -63,13 +69,16 @@ class AuthorizationController extends Controller
             return $this->generateAuthorizationCode($request, $client, Auth::user(), $redirectUri, $scope, $state);
         }
 
-        // User not logged in - store OAuth request in session and show login page
+        // User not logged in - store OAuth request in session and show login page.
+        // It expires so an abandoned OAuth login cannot hijack a later normal
+        // login (see DiscardExpiredOAuthRequest middleware).
         session([
             'oauth_request' => [
                 'client_id' => $clientId,
                 'redirect_uri' => $redirectUri,
                 'scope' => $scope,
                 'state' => $state,
+                'expires_at' => now()->addMinutes(self::PENDING_REQUEST_TTL_MINUTES)->timestamp,
             ]
         ]);
 

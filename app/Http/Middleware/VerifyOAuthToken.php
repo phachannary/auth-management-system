@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\OAuthAccessToken;
 use App\Services\JwtService;
 use Closure;
 use Illuminate\Http\Request;
@@ -44,6 +45,19 @@ class VerifyOAuthToken
             return response()->json([
                 'error' => 'invalid_token',
                 'error_description' => 'Token must be an access token',
+            ], 401);
+        }
+
+        // Verify token exists in database and is not revoked or expired
+        $tokenIsActive = OAuthAccessToken::where('token', hash('sha256', $token))
+            ->where('revoked', false)
+            ->where('expires_at', '>', now())
+            ->exists();
+
+        if (!$tokenIsActive) {
+            return response()->json([
+                'error' => 'invalid_token',
+                'error_description' => 'Token not found or revoked',
             ], 401);
         }
 

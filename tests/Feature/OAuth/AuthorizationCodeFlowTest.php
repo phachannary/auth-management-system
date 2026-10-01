@@ -38,6 +38,8 @@ class AuthorizationCodeFlowTest extends TestCase
 
     public function test_logged_out_authorize_stores_request_and_shows_oauth_login()
     {
+        $this->freezeSecond();
+
         $response = $this->get($this->authorizeUrl());
 
         $response->assertRedirect(route('oauth.login'));
@@ -46,6 +48,7 @@ class AuthorizationCodeFlowTest extends TestCase
             'redirect_uri' => self::REDIRECT_URI,
             'scope' => 'openid profile email',
             'state' => 'state-123',
+            'expires_at' => now()->addMinutes(15)->timestamp,
         ]);
         $this->assertSame(0, OAuthAuthCode::count());
 

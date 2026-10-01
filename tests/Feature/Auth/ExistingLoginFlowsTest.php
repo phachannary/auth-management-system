@@ -198,6 +198,135 @@ class ExistingLoginFlowsTest extends TestCase
         $this->assertSame('cognito-sub-dave', $user->fresh()->cognito_sub);
     }
 
+    // --- New Google user + OTP verification with a pending OAuth request --
+
+    public function test_new_google_user_completing_otp_verification_returns_to_client_with_code()
+    {
+        $this->mockSocialiteUser('google', 'g-789', 'carol@gmail.com', 'Carol');
+        $this->mock(CognitoService::class, function ($mock) {
+            $mock->shouldReceive('getUserStatus')->with('carol')->andReturn(['success' => true, 'status' => 'UNCONFIRMED']);
+            $mock->shouldReceive('signUp')->andReturn(['success' => true, 'data' => []]);
+            $mock->shouldReceive('confirmSignUp')->with('carol', '123456')->andReturn(['success' => true]);
+        });
+
+        $this->get($this->authorizeUrl())->assertRedirect(route('oauth.login'));
+        $this->get('/auth/google/callback')->assertRedirect(route('auth.verify'));
+
+        $verify = $this->post('/auth/verify', ['username' => 'carol', 'code' => '123456']);
+        $this->assertStringStartsWith(route('oauth.authorize') . '?', $verify->headers->get('Location'));
+
+        $user = User::where('email', 'carol@gmail.com')->firstOrFail();
+        $this->assertCodeIssuedFor($user, $this->get($verify->headers->get('Location')));
+    }
+
+    // --- Stale / abandoned OAuth requests ---------------------------------
+
+    public function test_authorize_stores_oauth_request_with_expiry()
+    {
+        $this->freezeSecond();
+
+        $this->get($this->authorizeUrl());
+
+        $expiresAt = session('oauth_request')['expires_at'];
+        $this->assertSame(now()->addMinutes(15)->timestamp, $expiresAt);
+    }
+
+    public function test_oauth_request_within_ttl_still_redirects_after_password_login()
+    {
+        User::factory()->create(['name' => 'alice']);
+        $this->mockSuccessfulCognitoPasswordLogin();
+
+        $this->get($this->authorizeUrl());
+        $this->travel(14)->minutes();
+
+        $login = $this->post('/auth/login', ['username' => 'alice', 'password' => 'secret']);
+        $this->assertStringStartsWith(route('oauth.authorize') . '?', $login->headers->get('Location'));
+    }
+
+    public function test_expired_oauth_request_does_not_affect_later_password_login()
+    {
+        $user = User::factory()->create(['name' => 'alice']);
+        $this->mockSuccessfulCognitoPasswordLogin();
+
+        $this->get($this->authorizeUrl());
+        $this->travel(16)->minutes();
+
+        $this->post('/auth/login', ['username' => 'alice', 'password' => 'secret'])
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionMissing('oauth_request');
+
+        $this->assertAuthenticatedAs($user);
+        $this->assertSame(0, OAuthAuthCode::count());
+    }
+
+    public function test_expired_oauth_request_does_not_affect_later_google_login()
+    {
+        $user = User::factory()->create(['google_id' => 'g-123']);
+        $this->mockSocialiteUser('google', 'g-123', $user->email, $user->name);
+        $this->mock(CognitoService::class);
+
+        $this->get($this->authorizeUrl());
+        $this->travel(16)->minutes();
+
+        $this->get('/auth/google/callback')
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionMissing('oauth_request');
+    }
+
+    public function test_expired_oauth_request_does_not_affect_later_facebook_login()
+    {
+        $user = User::factory()->create(['facebook_id' => 'fb-123']);
+        $this->mockSocialiteUser('facebook', 'fb-123', $user->email, $user->name);
+        $this->mock(CognitoService::class);
+
+        $this->get($this->authorizeUrl());
+        $this->travel(16)->minutes();
+
+        $this->get('/auth/facebook/callback')
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionMissing('oauth_request');
+    }
+
+    public function test_oauth_request_without_expiry_is_treated_as_stale()
+    {
+        // Shape stored by the previous implementation (no expires_at)
+        $user = User::factory()->create(['name' => 'alice']);
+        $this->mockSuccessfulCognitoPasswordLogin();
+
+        $this->withSession(['oauth_request' => [
+            'client_id' => 'ds1_test_client',
+            'redirect_uri' => self::REDIRECT_URI,
+            'scope' => 'openid profile email',
+            'state' => 'old-state',
+        ]])
+            ->post('/auth/login', ['username' => 'alice', 'password' => 'secret'])
+            ->assertRedirect(route('dashboard'))
+            ->assertSessionMissing('oauth_request');
+
+        $this->assertAuthenticatedAs($user);
+    }
+
+    public function test_expired_oauth_request_on_oauth_login_page_falls_back_to_normal_login()
+    {
+        $this->get($this->authorizeUrl());
+        $this->travel(16)->minutes();
+
+        $this->get(route('oauth.login'))->assertRedirect(route('auth.login'));
+    }
+
+    public function test_restarting_authorization_after_expiry_works()
+    {
+        User::factory()->create(['name' => 'alice']);
+        $this->mockSuccessfulCognitoPasswordLogin();
+
+        $this->get($this->authorizeUrl());
+        $this->travel(16)->minutes();
+        $this->get($this->authorizeUrl())->assertRedirect(route('oauth.login'));
+
+        $login = $this->post('/auth/login', ['username' => 'alice', 'password' => 'secret']);
+        $this->assertStringStartsWith(route('oauth.authorize') . '?', $login->headers->get('Location'));
+    }
+
     // --- helpers ----------------------------------------------------------
 
     private function authorizeUrl(): string

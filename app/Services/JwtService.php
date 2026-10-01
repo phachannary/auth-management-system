@@ -43,6 +43,9 @@ class JwtService
         $now = time();
         
         $tokenPayload = array_merge($payload, [
+            'iss' => config('app.url'),
+            'aud' => $payload['client_id'] ?? null,
+            'jti' => $this->generateTokenId(),
             'iat' => $now,
             'exp' => $now + (60 * 60), // 1 hour
             'type' => 'access_token',
@@ -56,12 +59,22 @@ class JwtService
         $now = time();
         
         $tokenPayload = array_merge($payload, [
+            'jti' => $this->generateTokenId(),
             'iat' => $now,
             'exp' => $now + (60 * 60 * 24 * 30), // 30 days
             'type' => 'refresh_token',
         ]);
 
         return JWT::encode($tokenPayload, $this->secretKey, $this->algorithm);
+    }
+
+    /**
+     * Unique token ID. Without it, two tokens with the same claims issued in
+     * the same second are byte-identical and collide on the unique token hash.
+     */
+    private function generateTokenId(): string
+    {
+        return bin2hex(random_bytes(16));
     }
 
     public function generateIdToken(array $payload): string
