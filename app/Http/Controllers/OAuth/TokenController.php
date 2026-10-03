@@ -50,9 +50,9 @@ class TokenController extends Controller
         ]);
 
         $code = $request->input('code');
-        $redirectUri = $request->input('redirect_uri');
-        $clientId = $request->input('client_id');
-        $clientSecret = $request->input('client_secret');
+        $redirectUri = trim($request->input('redirect_uri'));
+        $clientId = trim($request->input('client_id'));
+        $clientSecret = $request->input('client_secret') ? trim($request->input('client_secret')) : null;
 
         // Find the OAuth client
         $client = OAuthClient::where('client_id', $clientId)
@@ -68,7 +68,7 @@ class TokenController extends Controller
 
         // Validate client secret if client is confidential
         if ($client->confidential) {
-            if (!$clientSecret || $clientSecret !== $client->client_secret) {
+            if (!$clientSecret || !hash_equals($clientSecret, $client->client_secret)) {
                 return response()->json([
                     'error' => 'invalid_client',
                     'error_description' => 'Client authentication failed',
@@ -160,8 +160,8 @@ class TokenController extends Controller
         ]);
 
         $refreshToken = $request->input('refresh_token');
-        $clientId = $request->input('client_id');
-        $clientSecret = $request->input('client_secret');
+        $clientId = trim($request->input('client_id'));
+        $clientSecret = $request->input('client_secret') ? trim($request->input('client_secret')) : null;
 
         // Find the OAuth client
         $client = OAuthClient::where('client_id', $clientId)
@@ -177,7 +177,7 @@ class TokenController extends Controller
 
         // Validate client secret if client is confidential
         if ($client->confidential) {
-            if (!$clientSecret || $clientSecret !== $client->client_secret) {
+            if (!$clientSecret || !hash_equals($clientSecret, $client->client_secret)) {
                 return response()->json([
                     'error' => 'invalid_client',
                     'error_description' => 'Client authentication failed',
