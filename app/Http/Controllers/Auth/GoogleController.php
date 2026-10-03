@@ -82,6 +82,15 @@ class GoogleController extends Controller
             // Check if user already exists and is confirmed in Cognito
             $statusResult = $this->cognitoService->getUserStatus($username);
 
+            Log::info('Google OAuth - User status check', [
+                'email' => $email,
+                'username' => $username,
+                'status_success' => $statusResult['success'],
+                'status' => $statusResult['status'] ?? null,
+                'status_error' => $statusResult['error'] ?? null,
+                'has_oauth_request' => session('oauth_request') ? 'yes' : 'no',
+            ]);
+
             if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
                 // User is already confirmed - create or update local user and log in
                 $user = User::where('email', $email)->first();
@@ -122,12 +131,38 @@ class GoogleController extends Controller
 
             // User not confirmed - proceed with verification flow
             // Create AWS Cognito user (required to send verification code)
+            Log::info('Google OAuth - Attempting Cognito SignUp', [
+                'email' => $email,
+                'username' => $username,
+            ]);
+
             $cognitoCheck = $this->cognitoService->signUp($username, $password, $email);
+
+            Log::info('Google OAuth - Cognito SignUp result', [
+                'email' => $email,
+                'username' => $username,
+                'success' => $cognitoCheck['success'],
+                'error' => $cognitoCheck['error'] ?? null,
+                'data' => $cognitoCheck['data'] ?? null,
+            ]);
 
             if (!$cognitoCheck['success']) {
 
                 // User exists in Cognito — try to send a new OTP code
+                Log::info('Google OAuth - User exists in Cognito, attempting resend', [
+                    'email' => $email,
+                    'username' => $username,
+                ]);
+
                 $resendResult = $this->cognitoService->resendConfirmationCode($username);
+
+                Log::info('Google OAuth - Resend confirmation code result', [
+                    'email' => $email,
+                    'username' => $username,
+                    'success' => $resendResult['success'],
+                    'error' => $resendResult['error'] ?? null,
+                    'data' => $resendResult['data'] ?? null,
+                ]);
 
                 if (!$resendResult['success']) {
                     session()->forget(['auth_state']);
