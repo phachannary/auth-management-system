@@ -242,6 +242,11 @@ class AuthController extends Controller
 
                     $localUser->save();
 
+                    // Revoke all existing OAuth tokens for this user to prevent token reuse
+                    // This ensures a fresh authentication session
+                    \App\Models\OAuthAccessToken::where('user_id', $localUser->id)->update(['revoked' => true]);
+                    \App\Models\OAuthRefreshToken::where('user_id', $localUser->id)->update(['revoked' => true]);
+
                     // Log in with Laravel Auth
                     Auth::login($localUser);
                 } else {
@@ -383,6 +388,10 @@ class AuthController extends Controller
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
 
+                // Revoke all existing OAuth tokens for this user to prevent token reuse
+                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
+                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
+
                 // Check if this is an OAuth flow
                 if (session('oauth_request')) {
                     return redirect()->route('oauth.authorize', [
@@ -424,6 +433,10 @@ class AuthController extends Controller
 
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
+
+                // Revoke all existing OAuth tokens for this user to prevent token reuse
+                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
+                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
 
                 // Check if this is an OAuth flow
                 if (session('oauth_request')) {
@@ -484,6 +497,10 @@ class AuthController extends Controller
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
 
+                // Revoke all existing OAuth tokens for this user to prevent token reuse
+                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
+                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
+
                 // Check if this is an OAuth flow
                 if (session('oauth_request')) {
                     return redirect()->route('oauth.authorize', [
@@ -525,6 +542,10 @@ class AuthController extends Controller
 
                 Auth::login($user);
                 Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
+
+                // Revoke all existing OAuth tokens for this user to prevent token reuse
+                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
+                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
 
                 // Check if this is an OAuth flow
                 if (session('oauth_request')) {
@@ -663,8 +684,33 @@ class AuthController extends Controller
             $this->cognitoService->globalSignOut($tokens['access_token']);
         }
 
-        // Clear local session
-        Session::forget(['cognito_tokens', 'user']);
+        // Revoke all OAuth tokens for the current user
+        if (Auth::check()) {
+            $user = Auth::user();
+            \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
+            \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
+        }
+
+        // Clear all session data including OAuth state
+        Session::forget([
+            'cognito_tokens',
+            'user',
+            'oauth_request',
+            'google_oauth_email',
+            'google_oauth_name',
+            'google_oauth_id',
+            'facebook_oauth_email',
+            'facebook_oauth_name',
+            'facebook_oauth_id',
+            'verification_username',
+            'verification_email',
+            'verification_expires_at',
+            'verification_otp_session_id',
+            'verification_code_sent_at',
+            'verification_already_confirmed',
+            'auth_state',
+        ]);
+
         Auth::logout();
         Session::invalidate();
         Session::regenerateToken();

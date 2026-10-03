@@ -29,6 +29,9 @@ Route::prefix('oauth')->group(function () {
     
     // JWKS endpoint (public keys for JWT validation)
     Route::get('/.well-known/jwks.json', [JwksController::class, 'jwks']);
+    
+    // Revocation endpoint (requires OAuth access token)
+    Route::post('/revoke', [TokenController::class, 'revoke']);
 });
 
 // OAuth 2.0 Protected API Routes (requires OAuth access token)

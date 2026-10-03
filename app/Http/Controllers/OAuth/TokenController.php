@@ -279,4 +279,50 @@ class TokenController extends Controller
             'id_token' => $newIdToken,
         ]);
     }
+
+    public function revoke(Request $request)
+    {
+        $request->validate([
+            'token' => 'required|string',
+            'token_type_hint' => 'nullable|in:access_token,refresh_token',
+        ]);
+
+        $token = $request->input('token');
+        $tokenTypeHint = $request->input('token_type_hint');
+
+        // Try to revoke as access token first
+        $accessTokenRecord = OAuthAccessToken::where('token', hash('sha256', $token))
+            ->where('revoked', false)
+            ->first();
+
+        if ($accessTokenRecord) {
+            $accessTokenRecord->update(['revoked' => true]);
+            
+            // Also revoke associated refresh token
+            OAuthRefreshToken::where('access_token_id', $accessTokenRecord->id)
+                ->update(['revoked' => true]);
+            
+            return response()->json([], 200);
+        }
+
+        // If not found as access token or hint is refresh_token, try as refresh token
+        if (!$accessTokenRecord || $tokenTypeHint === 'refresh_token') {
+            $refreshTokenRecord = OAuthRefreshToken::where('token', hash('sha256', $token))
+                ->where('revoked', false)
+                ->first();
+
+            if ($refreshTokenRecord) {
+                $refreshTokenRecord->update(['revoked' => true]);
+                
+                // Also revoke associated access token
+                OAuthAccessToken::whereKey($refreshTokenRecord->access_token_id)
+                    ->update(['revoked' => true]);
+                
+                return response()->json([], 200);
+            }
+        }
+
+        // Token not found or already revoked - return 200 per RFC 7009
+        return response()->json([], 200);
+    }
 }

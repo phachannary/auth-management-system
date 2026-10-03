@@ -174,8 +174,25 @@ class CognitoLoginController extends Controller
             $this->cognitoService->globalSignOut($tokens['access_token']);
         }
 
-        // Clear local session
-        Session::forget(['cognito_tokens']);
+        // Clear all session data including OAuth state
+        Session::forget([
+            'cognito_tokens',
+            'oauth_request',
+            'google_oauth_email',
+            'google_oauth_name',
+            'google_oauth_id',
+            'facebook_oauth_email',
+            'facebook_oauth_name',
+            'facebook_oauth_id',
+            'verification_username',
+            'verification_email',
+            'verification_expires_at',
+            'verification_otp_session_id',
+            'verification_code_sent_at',
+            'verification_already_confirmed',
+            'auth_state',
+        ]);
+
         Auth::logout();
         Session::invalidate();
         Session::regenerateToken();
