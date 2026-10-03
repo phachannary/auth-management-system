@@ -109,6 +109,15 @@
                     </a>
                 </div>
             </div>
+
+            <div class="mt-6 text-center">
+                <p class="text-sm text-gray-600">
+                    Don't have an account?
+                    <a href="{{ route('auth.register') }}" class="font-medium text-indigo-600 hover:text-indigo-500">
+                        Register here
+                    </a>
+                </p>
+            </div>
         </div>
     </div>
 </body>
