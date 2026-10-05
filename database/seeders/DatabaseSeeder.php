@@ -20,5 +20,8 @@ class DatabaseSeeder extends Seeder
         //     'name' => 'Test User',
         //     'email' => 'test@example.com',
         // ]);
+
+        // Uncomment to seed OAuth clients (use oauth:setup-client command for production)
+        // $this->call(OAuthClientSeeder::class);
     }
 }
