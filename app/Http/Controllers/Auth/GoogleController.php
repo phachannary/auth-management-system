@@ -63,6 +63,7 @@ class GoogleController extends Controller
             if ($existingUser && $existingUser->email_verified_at) {
                 // User exists and is verified - log them in directly
                 Auth::login($existingUser);
+                Session::regenerate();
                 session()->forget(['auth_state']);
 
                 // Revoke all existing OAuth tokens for this user to prevent token reuse
@@ -93,99 +94,37 @@ class GoogleController extends Controller
                 'google_oauth_id' => $googleId,
             ]);
 
-            // Check if user already exists and is confirmed in Cognito
-            $statusResult = $this->cognitoService->getUserStatus($username);
-
-            Log::info('Google OAuth - User status check', [
-                'email' => $email,
-                'username' => $username,
-                'status_success' => $statusResult['success'],
-                'status' => $statusResult['status'] ?? null,
-                'status_error' => $statusResult['error'] ?? null,
-                'has_oauth_request' => session('oauth_request') ? 'yes' : 'no',
-            ]);
-
-            if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
-                // User is already confirmed - create or update local user and log in
-                $user = User::where('email', $email)->first();
-
-                if (!$user) {
-                    $user = User::create([
-                        'name' => $name ?? explode('@', $email)[0],
-                        'email' => $email,
-                        'google_id' => $googleId,
-                        'email_verified_at' => now(),
-                        'password' => bcrypt(Str::random(32)),
-                    ]);
-                } else {
-                    if (!$user->google_id) {
-                        $user->google_id = $googleId;
-                        $user->email_verified_at = now();
-                        $user->save();
-                    }
-                }
-
-                Auth::login($user);
-                Session::regenerate();
-                session()->forget(['auth_state', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
-
-                // Revoke all existing OAuth tokens for this user to prevent token reuse
-                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
-                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
-
-                // Check if this is an OAuth flow
-                if (session('oauth_request')) {
-                    return redirect()->route('oauth.authorize', [
-                        'client_id' => session('oauth_request')['client_id'],
-                        'redirect_uri' => session('oauth_request')['redirect_uri'],
-                        'response_type' => 'code',
-                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
-                        'state' => session('oauth_request')['state'] ?? null,
-                    ]);
-                }
-
-                return redirect()->route('dashboard')->with('success', 'Welcome back!');
-            }
-
-            // User not confirmed - proceed with verification flow
             // Create AWS Cognito user (required to send verification code)
-            Log::info('Google OAuth - Attempting Cognito SignUp', [
-                'email' => $email,
-                'username' => $username,
-            ]);
-
             $cognitoCheck = $this->cognitoService->signUp($username, $password, $email);
 
-            Log::info('Google OAuth - Cognito SignUp result', [
-                'email' => $email,
-                'username' => $username,
-                'success' => $cognitoCheck['success'],
-                'error' => $cognitoCheck['error'] ?? null,
-                'data' => $cognitoCheck['data'] ?? null,
-            ]);
-
             if (!$cognitoCheck['success']) {
-
                 // User exists in Cognito — try to send a new OTP code
-                Log::info('Google OAuth - User exists in Cognito, attempting resend', [
-                    'email' => $email,
-                    'username' => $username,
-                ]);
-
                 $resendResult = $this->cognitoService->resendConfirmationCode($username);
 
-                Log::info('Google OAuth - Resend confirmation code result', [
-                    'email' => $email,
-                    'username' => $username,
-                    'success' => $resendResult['success'],
-                    'error' => $resendResult['error'] ?? null,
-                    'data' => $resendResult['data'] ?? null,
-                ]);
-
                 if (!$resendResult['success']) {
-                    session()->forget(['auth_state']);
+                    // Cognito is unavailable or the user is in an unexpected state
+                    // Do NOT authenticate based on error message content
+                    // Log the error and redirect with guidance
+                    Log::error('Google OAuth - Cognito verification failed', [
+                        'email' => $email,
+                        'username' => $username,
+                        'sign_up_error' => $cognitoCheck['error'] ?? null,
+                        'resend_error' => $resendResult['error'] ?? null,
+                    ]);
+
+                    session()->forget([
+                        'auth_state',
+                        'google_oauth_name',
+                        'google_oauth_email',
+                        'google_oauth_id',
+                        'verification_username',
+                        'verification_email',
+                        'verification_otp_session_id',
+                        'verification_code_sent_at',
+                        'verification_expires_at',
+                    ]);
                     return redirect()->route('auth.login')
-                        ->with('error', 'Unable to send verification code. Please try again or contact support.');
+                        ->with('error', 'Unable to send verification code. This may be due to a service configuration issue. Please contact support or try again later.');
                 }
             }
 
@@ -220,12 +159,4 @@ class GoogleController extends Controller
         }
     }
 
-    private function isAlreadyConfirmed(?string $error): bool
-    {
-        if (!$error) {
-            return false;
-        }
-
-        return str_contains($error, 'CONFIRMED') || str_contains($error, 'already confirmed');
-    }
 }

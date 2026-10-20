@@ -163,4 +163,28 @@ class RefreshTokenGrantTest extends TestCase
 
         $this->assertFalse(OAuthRefreshToken::first()->revoked);
     }
+
+    public function test_refresh_with_invalid_client_id_is_rejected()
+    {
+        $user = User::factory()->create();
+        $tokens = $this->exchangeCode($user);
+
+        $this->refresh($tokens['refresh_token'], ['client_id' => 'invalid_client'])
+            ->assertStatus(401)
+            ->assertJson(['error' => 'invalid_client']);
+
+        $this->assertFalse(OAuthRefreshToken::first()->revoked);
+    }
+
+    public function test_refresh_with_missing_client_secret_for_confidential_client_is_rejected()
+    {
+        $user = User::factory()->create();
+        $tokens = $this->exchangeCode($user);
+
+        $this->refresh($tokens['refresh_token'], ['client_secret' => null])
+            ->assertStatus(401)
+            ->assertJson(['error' => 'invalid_client']);
+
+        $this->assertFalse(OAuthRefreshToken::first()->revoked);
+    }
 }

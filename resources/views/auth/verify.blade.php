@@ -16,9 +16,9 @@
                 <p class="mt-2 text-center text-sm text-gray-600">
                     We've sent a verification code to your email address.
                 </p>
-                @if(session('verification_email'))
+                @if($verification_email)
                     <p class="mt-1 text-center text-xs text-gray-500">
-                        Email: {{ session('verification_email') }}
+                        Email: {{ $verification_email }}
                     </p>
                 @endif
                 @if(session('code_delivery_details'))

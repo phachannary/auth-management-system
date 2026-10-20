@@ -180,7 +180,7 @@ class AuthorizationCodeFlowTest extends TestCase
         $user = User::factory()->create();
         $code = $this->issueCode($user);
 
-        $response = $this->postJson('/api/oauth/token', $this->tokenRequest($code));
+        $response = $this->postJsonToken('/api/oauth/token', $this->tokenRequest($code));
 
         $response->assertOk();
         $response->assertJsonStructure(['access_token', 'token_type', 'expires_in', 'refresh_token', 'id_token']);
@@ -198,9 +198,9 @@ class AuthorizationCodeFlowTest extends TestCase
         $user = User::factory()->create();
         $code = $this->issueCode($user);
 
-        $this->postJson('/api/oauth/token', $this->tokenRequest($code))->assertOk();
+        $this->postJsonToken('/api/oauth/token', $this->tokenRequest($code))->assertOk();
 
-        $this->postJson('/api/oauth/token', $this->tokenRequest($code))
+        $this->postJsonToken('/api/oauth/token', $this->tokenRequest($code))
             ->assertStatus(400)
             ->assertJson(['error' => 'invalid_grant']);
 
@@ -212,7 +212,7 @@ class AuthorizationCodeFlowTest extends TestCase
         $user = User::factory()->create();
         $code = $this->issueCode($user);
 
-        $this->postJson('/api/oauth/token', $this->tokenRequest($code, [
+        $this->postJsonToken('/api/oauth/token', $this->tokenRequest($code, [
             'redirect_uri' => 'http://localhost:8000/auth/callback',
         ]))
             ->assertStatus(400)
@@ -226,11 +226,11 @@ class AuthorizationCodeFlowTest extends TestCase
         $user = User::factory()->create();
         $code = $this->issueCode($user);
 
-        $this->postJson('/api/oauth/token', $this->tokenRequest($code, ['client_secret' => 'wrong']))
+        $this->postJsonToken('/api/oauth/token', $this->tokenRequest($code, ['client_secret' => 'wrong']))
             ->assertStatus(401)
             ->assertJson(['error' => 'invalid_client']);
 
-        $this->postJson('/api/oauth/token', $this->tokenRequest($code, ['client_secret' => null]))
+        $this->postJsonToken('/api/oauth/token', $this->tokenRequest($code, ['client_secret' => null]))
             ->assertStatus(401)
             ->assertJson(['error' => 'invalid_client']);
 
@@ -243,7 +243,7 @@ class AuthorizationCodeFlowTest extends TestCase
         $user = User::factory()->create();
         $code = $this->issueCode($user);
 
-        $this->postJson('/api/oauth/token', $this->tokenRequest($code, ['client_id' => 'unknown_client']))
+        $this->postJsonToken('/api/oauth/token', $this->tokenRequest($code, ['client_id' => 'unknown_client']))
             ->assertStatus(401)
             ->assertJson(['error' => 'invalid_client']);
     }
@@ -255,7 +255,7 @@ class AuthorizationCodeFlowTest extends TestCase
 
         $this->travel(11)->minutes();
 
-        $this->postJson('/api/oauth/token', $this->tokenRequest($code))
+        $this->postJsonToken('/api/oauth/token', $this->tokenRequest($code))
             ->assertStatus(400)
             ->assertJson(['error' => 'invalid_grant']);
     }
@@ -339,14 +339,6 @@ class AuthorizationCodeFlowTest extends TestCase
         return $this->queryFrom($response)['code'];
     }
 
-    private function exchange(User $user): array
-    {
-        $response = $this->postJson('/api/oauth/token', $this->tokenRequest($this->issueCode($user)));
-        $response->assertOk();
-
-        return $response->json();
-    }
-
     private function tokenRequest(string $code, array $overrides = []): array
     {
         return array_merge([
@@ -356,6 +348,20 @@ class AuthorizationCodeFlowTest extends TestCase
             'client_id' => self::CLIENT_ID,
             'client_secret' => self::CLIENT_SECRET,
         ], $overrides);
+    }
+
+    protected function postJsonToken($uri, array $data = [], array $headers = []): TestResponse
+    {
+        return $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class)
+            ->postJson($uri, $data, $headers);
+    }
+
+    private function exchange(User $user): array
+    {
+        $response = $this->postJsonToken('/api/oauth/token', $this->tokenRequest($this->issueCode($user)));
+        $response->assertOk();
+
+        return $response->json();
     }
 
     private function queryFrom(TestResponse $response): array

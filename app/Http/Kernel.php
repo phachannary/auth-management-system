@@ -68,5 +68,6 @@ class Kernel extends HttpKernel
         'oauth.token' => \App\Http\Middleware\VerifyOAuthToken::class,
         'role' => \App\Http\Middleware\CheckRoleForApp::class,
         'permission' => \App\Http\Middleware\CheckPermissionForApp::class,
+        'verification.session' => \App\Http\Middleware\RequireVerificationSession::class,
     ];
 }

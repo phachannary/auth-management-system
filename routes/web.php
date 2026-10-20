@@ -6,6 +6,7 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\CognitoLoginController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\Auth\FacebookController;
+use App\Http\Controllers\Auth\EmailVerificationController;
 use App\Http\Controllers\OAuth\AuthorizationController;
 use App\Http\Controllers\OAuth\OAuthLoginController;
 
@@ -37,9 +38,9 @@ Route::prefix('auth')->name('auth.')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
     Route::get('/register', [AuthController::class, 'showRegistrationForm'])->name('register');
     Route::post('/register', [AuthController::class, 'register']);
-    Route::get('/verify', [AuthController::class, 'showVerificationForm'])->name('verify');
-    Route::post('/verify', [AuthController::class, 'verify']);
-    Route::post('/resend-code', [AuthController::class, 'resendVerificationCode'])->name('resend-verify');
+    Route::get('/verify', [EmailVerificationController::class, 'showVerificationForm'])->name('verify');
+    Route::post('/verify', [EmailVerificationController::class, 'verify'])->middleware('verification.session');
+    Route::post('/resend-code', [EmailVerificationController::class, 'resendCode'])->name('resend-verify');
     Route::get('/clear-session', function () {
         Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at', 'google_oauth_email', 'google_oauth_name', 'google_oauth_id']);
         return redirect()->route('auth.login')->with('success', 'Session cleared. Please login.');

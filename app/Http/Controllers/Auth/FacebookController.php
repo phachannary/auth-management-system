@@ -102,21 +102,34 @@ class FacebookController extends Controller
             // Create AWS Cognito user (required to send verification code)
             $cognitoCheck = $this->cognitoService->signUp($username, $password, $email);
 
-            $alreadyConfirmedInCognito = false;
-
             if (!$cognitoCheck['success']) {
-
                 // User exists in Cognito — try to send a new OTP code
                 $resendResult = $this->cognitoService->resendConfirmationCode($username);
 
                 if (!$resendResult['success']) {
-                    if ($this->isAlreadyConfirmed($resendResult['error'] ?? null)) {
-                        $alreadyConfirmedInCognito = true;
-                    } else {
-                        session()->forget(['auth_state']);
-                        return redirect()->route('auth.login')
-                            ->with('error', 'Unable to send verification code. Please try again or contact support.');
-                    }
+                    // Cognito is unavailable or the user is in an unexpected state
+                    // Do NOT authenticate based on error message content
+                    // Log the error and redirect with guidance
+                    Log::error('Facebook OAuth - Cognito verification failed', [
+                        'email' => $email,
+                        'username' => $username,
+                        'sign_up_error' => $cognitoCheck['error'] ?? null,
+                        'resend_error' => $resendResult['error'] ?? null,
+                    ]);
+
+                    session()->forget([
+                        'auth_state',
+                        'facebook_oauth_name',
+                        'facebook_oauth_email',
+                        'facebook_oauth_id',
+                        'verification_username',
+                        'verification_email',
+                        'verification_otp_session_id',
+                        'verification_code_sent_at',
+                        'verification_expires_at',
+                    ]);
+                    return redirect()->route('auth.login')
+                        ->with('error', 'Unable to send verification code. This may be due to a service configuration issue. Please contact support or try again later.');
                 }
             }
 
@@ -130,15 +143,10 @@ class FacebookController extends Controller
                 'verification_otp_session_id'      => $otpSessionId,
                 'verification_code_sent_at'        => now(),
                 'verification_expires_at'          => $expiresAt,
-                'verification_already_confirmed'   => $alreadyConfirmedInCognito,
             ]);
 
-            $flashMessage = $alreadyConfirmedInCognito
-                ? 'Your email was previously verified. Click the button below to confirm and access your dashboard.'
-                : 'A verification code has been sent to your email. Please enter the 6-digit code.';
-
             return redirect()->route('auth.verify')
-                ->with('info', $flashMessage);
+                ->with('info', 'A verification code has been sent to your email. Please enter the 6-digit code.');
 
         } catch (\Exception $e) {
             session()->forget([
@@ -156,24 +164,4 @@ class FacebookController extends Controller
         }
     }
 
-    private function isAlreadyConfirmed(?string $error): bool
-    {
-        if (!$error) {
-            return false;
-        }
-
-        $alreadyConfirmedMessages = [
-            'User is already confirmed',
-            'NotAuthorizedException',
-            'AliasExistsException',
-        ];
-
-        foreach ($alreadyConfirmedMessages as $message) {
-            if (strpos($error, $message) !== false) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

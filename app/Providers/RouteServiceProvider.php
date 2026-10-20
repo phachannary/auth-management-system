@@ -46,6 +46,11 @@ class RouteServiceProvider extends ServiceProvider
     protected function configureRateLimiting()
     {
         RateLimiter::for('api', function (Request $request) {
+            // Disable rate limiting in testing environment to prevent
+            // 429 errors during test suite runs while maintaining production security
+            if (app()->environment('testing')) {
+                return Limit::none();
+            }
             return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
         });
     }

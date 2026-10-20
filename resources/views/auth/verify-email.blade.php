@@ -98,7 +98,7 @@
                 </div>
             @endif
 
-            <form class="mt-8 space-y-6" action="{{ route('auth.verification.verify') }}" method="POST">
+            <form class="mt-8 space-y-6" action="{{ route('auth.verify') }}" method="POST">
                 @csrf
                 <input type="hidden" name="username" value="{{ $username }}">
                 <input type="hidden" name="otp_session_id" value="{{ $otpSessionId }}">
@@ -153,7 +153,7 @@
                 <p class="text-sm text-gray-600">
                     Code expired or didn't receive it? Send a fresh code and use the newest email only.
                 </p>
-                <form action="{{ route('auth.verification.resend') }}" method="POST" class="inline">
+                <form action="{{ route('auth.resend-verify') }}" method="POST" class="inline">
                     @csrf
                     <button type="submit"
                             class="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm text-white bg-indigo-600 hover:bg-indigo-700 font-medium transition duration-200">

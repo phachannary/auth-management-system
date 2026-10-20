@@ -7,6 +7,7 @@ use App\Services\CognitoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Session;
 use Illuminate\Support\Str;
 use App\Models\User;
 
@@ -95,32 +96,28 @@ class EmailVerificationController extends Controller
         }
 
         try {
-            // Check if user is already confirmed
-            $statusResult = $this->cognitoService->getUserStatus($username);
-            Log::info('User status check', [
-                'username' => $username,
-                'status' => $statusResult['status'] ?? 'UNKNOWN',
-                'success' => $statusResult['success'] ?? false,
+            // SECURITY: Always validate the code - never bypass based on Cognito status
+            // This prevents attackers from logging in with any code if the user is already confirmed
+            Log::info('Calling Cognito confirmSignUp for: ' . $username);
+            $result = $this->cognitoService->confirmSignUp($username, $request->code);
+            Log::info('Cognito confirmSignUp result', [
+                'success' => $result['success'],
+                'error' => $result['error'] ?? null,
             ]);
 
-            // If user is already confirmed, skip verification and proceed
-            if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
-                Log::info('User already confirmed, skipping verification: ' . $username);
-                $result = ['success' => true];
-            } else {
-                Log::info('Calling Cognito confirmSignUp for: ' . $username);
-                $result = $this->cognitoService->confirmSignUp($username, $request->code);
-                Log::info('Cognito confirmSignUp result', [
-                    'success' => $result['success'],
-                    'error' => $result['error'] ?? null,
-                ]);
-
-                // If confirmSignUp fails with "User cannot be confirmed. Current status is CONFIRMED"
-                // it means the user is already confirmed, so we can proceed
-                if (!$result['success'] && strpos($result['error'], 'User cannot be confirmed') !== false) {
-                    Log::info('User is already confirmed despite status check error, proceeding: ' . $username);
-                    $result = ['success' => true];
+            if (!$result['success']) {
+                // If error indicates user is already confirmed, redirect to login
+                if (strpos($result['error'], 'User cannot be confirmed') !== false ||
+                    strpos($result['error'], 'NotAuthorizedException') !== false) {
+                    Log::info('User is already confirmed, redirecting to login: ' . $username);
+                    $request->session()->forget(['verification_username', 'verification_email']);
+                    return redirect()->route('auth.login')
+                        ->with('error', 'This account is already verified. Please log in with your credentials.')
+                        ->with('verified_username', $username);
                 }
+
+                Log::error('Email verification failed: ' . $result['error']);
+                return back()->with('error', 'Invalid verification code. Please try again.');
             }
 
             if ($result['success']) {
@@ -225,10 +222,26 @@ class EmailVerificationController extends Controller
                 if ($user) {
                     // Log the user in
                     Auth::login($user);
+                    Session::regenerate();
                     Log::info('User logged in after email verification: ' . $user->email);
+
+                    // Revoke all existing OAuth tokens for this user to prevent token reuse
+                    \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
+                    \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
 
                     // Clear verification session
                     $request->session()->forget(['verification_username', 'verification_email']);
+
+                    // Check if this is an OAuth flow
+                    if (session('oauth_request')) {
+                        return redirect()->route('oauth.authorize', [
+                            'client_id' => session('oauth_request')['client_id'],
+                            'redirect_uri' => session('oauth_request')['redirect_uri'],
+                            'response_type' => 'code',
+                            'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                            'state' => session('oauth_request')['state'] ?? null,
+                        ]);
+                    }
 
                     return redirect()->route('dashboard')->with('success', 'Email verified successfully! Welcome to your dashboard.');
                 } else {

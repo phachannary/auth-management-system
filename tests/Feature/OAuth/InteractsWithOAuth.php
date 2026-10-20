@@ -43,13 +43,14 @@ trait InteractsWithOAuth
 
     protected function exchangeCode(User $user): array
     {
-        $response = $this->postJson('/api/oauth/token', [
-            'grant_type' => 'authorization_code',
-            'code' => $this->issueCode($user),
-            'redirect_uri' => 'http://localhost:3000/auth/callback',
-            'client_id' => 'ds1_test_client',
-            'client_secret' => 'test_secret',
-        ]);
+        $response = $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class)
+            ->postJson('/api/oauth/token', [
+                'grant_type' => 'authorization_code',
+                'code' => $this->issueCode($user),
+                'redirect_uri' => 'http://localhost:3000/auth/callback',
+                'client_id' => 'ds1_test_client',
+                'client_secret' => 'test_secret',
+            ]);
         $response->assertOk();
 
         return $response->json();
@@ -57,12 +58,13 @@ trait InteractsWithOAuth
 
     protected function refresh(string $refreshToken, array $overrides = [])
     {
-        return $this->postJson('/api/oauth/token', array_merge([
-            'grant_type' => 'refresh_token',
-            'refresh_token' => $refreshToken,
-            'client_id' => 'ds1_test_client',
-            'client_secret' => 'test_secret',
-        ], $overrides));
+        return $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class)
+            ->postJson('/api/oauth/token', array_merge([
+                'grant_type' => 'refresh_token',
+                'refresh_token' => $refreshToken,
+                'client_id' => 'ds1_test_client',
+                'client_secret' => 'test_secret',
+            ], $overrides));
     }
 
     protected function claims(string $jwt): array

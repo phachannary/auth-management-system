@@ -288,30 +288,11 @@ class AuthController extends Controller
     {
         // Allow username from session or from old input (after failed verification)
         $username = session('username') ?: session('verification_username') ?: old('username');
-        
-        // Check if verification session has expired (only for regular registration, not OAuth)
-        $expiresAt = session('verification_expires_at');
-        $isOAuthFlow = session('google_oauth_email') || session('facebook_oauth_email');
-        
-        if ($expiresAt && now()->gt($expiresAt) && !$isOAuthFlow) {
-            Session::forget([
-                'username',
-                'verification_username',
-                'verification_email',
-                'verification_expires_at',
-                'verification_otp_session_id',
-                'verification_code_sent_at',
-                'verification_already_confirmed',
-            ]);
-            return redirect()->route('auth.login')
-                ->with('error', 'Your verification session has expired. Please register again or request a new verification code.');
-        }
-        
-        // Don't redirect if no username - allow manual entry for unconfirmed users
-        // who are redirected from login
 
         // Check if user is already confirmed in Cognito (only if we have a username)
-        if ($username) {
+        // Skip this check for OAuth flows to allow them to proceed through verification page
+        $isOAuthFlow = session('google_oauth_email') || session('facebook_oauth_email');
+        if ($username && !$isOAuthFlow) {
             $statusResult = $this->cognitoService->getUserStatus($username);
             if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
                 // User is already confirmed, clear ALL verification-related session data
@@ -340,7 +321,7 @@ class AuthController extends Controller
         return view('auth.verify', [
             'username' => $username,
             'resend_available' => session('resend_available'),
-            'verification_email' => session('verification_email')
+            'verification_email' => session('verification_email'),
         ]);
     }
 
@@ -354,242 +335,125 @@ class AuthController extends Controller
         // Store username in session for future use
         Session::put('verification_username', $request->username);
 
+        // SECURITY: Always validate the code - never bypass based on Cognito status
+        // This prevents attackers from logging in with any code if the user is already confirmed
+        $result = $this->cognitoService->confirmSignUp($request->username, $request->code);
 
-
-        // Check if user is already confirmed in Cognito before attempting verification
-        $statusResult = $this->cognitoService->getUserStatus($request->username);
-        if ($statusResult['success'] && $statusResult['status'] === 'CONFIRMED') {
-
-            // Check if this is a Google OAuth flow
-            $googleEmail = session('google_oauth_email');
-            if ($googleEmail) {
-                $googleName = session('google_oauth_name');
-                $googleId = session('google_oauth_id');
-
-                $user = User::where('email', $googleEmail)->first();
-                if (!$user) {
-                    $user = User::create([
-                        'name' => $googleName ?? explode('@', $googleEmail)[0],
-                        'email' => $googleEmail,
-                        'google_id' => $googleId,
-                        'email_verified_at' => now(),
-                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
-                    ]);
-
-                } else {
-                    if (!$user->google_id) {
-                        $user->google_id = $googleId;
-                        $user->email_verified_at = now();
-                        $user->save();
-
-                    }
-                }
-
-                Auth::login($user);
-                Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
-
-                // Revoke all existing OAuth tokens for this user to prevent token reuse
-                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
-                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
-
-                // Check if this is an OAuth flow
-                if (session('oauth_request')) {
-                    return redirect()->route('oauth.authorize', [
-                        'client_id' => session('oauth_request')['client_id'],
-                        'redirect_uri' => session('oauth_request')['redirect_uri'],
-                        'response_type' => 'code',
-                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
-                        'state' => session('oauth_request')['state'] ?? null,
-                    ]);
-                }
-
-                return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
+        if (!$result['success']) {
+            // If error indicates user is already confirmed, this is a legitimate edge case
+            // Redirect to login to handle properly (user should use existing credentials)
+            if (strpos($result['error'], 'User cannot be confirmed') !== false ||
+                strpos($result['error'], 'NotAuthorizedException') !== false) {
+                Session::forget(['username', 'verification_username', 'verification_email']);
+                return redirect()->route('auth.login')
+                    ->with('error', 'This account is already verified. Please log in with your credentials.')
+                    ->with('verified_username', $request->username);
             }
 
-            // Check if this is a Facebook OAuth flow
-            $facebookEmail = session('facebook_oauth_email');
-            if ($facebookEmail) {
-                $facebookName = session('facebook_oauth_name');
-                $facebookId = session('facebook_oauth_id');
-
-                $user = User::where('email', $facebookEmail)->first();
-                if (!$user) {
-                    $user = User::create([
-                        'name' => $facebookName ?? explode('@', $facebookEmail)[0],
-                        'email' => $facebookEmail,
-                        'facebook_id' => $facebookId,
-                        'email_verified_at' => now(),
-                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
-                    ]);
-
-                } else {
-                    if (!$user->facebook_id) {
-                        $user->facebook_id = $facebookId;
-                        $user->email_verified_at = now();
-                        $user->save();
-
-                    }
-                }
-
-                Auth::login($user);
-                Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
-
-                // Revoke all existing OAuth tokens for this user to prevent token reuse
-                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
-                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
-
-                // Check if this is an OAuth flow
-                if (session('oauth_request')) {
-                    return redirect()->route('oauth.authorize', [
-                        'client_id' => session('oauth_request')['client_id'],
-                        'redirect_uri' => session('oauth_request')['redirect_uri'],
-                        'response_type' => 'code',
-                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
-                        'state' => session('oauth_request')['state'] ?? null,
-                    ]);
-                }
-
-                return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
-            }
-
-            // Regular signup flow - update local user and redirect to login
-            $localUser = User::where('name', $request->username)->first();
-            if ($localUser) {
-                $localUser->email_verified_at = now();
-                $localUser->save();
-            }
-
-            Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
-            return redirect()->route('auth.login')->with('success', 'Your account is already verified. Please login.');
+            return back()->withErrors(['code' => $result['error'] ?? 'Invalid verification code. Please try again.']);
         }
 
-        $result = $this->cognitoService->confirmSignUp(
-            $request->username,
-            $request->code
-        );
+        // Code validated successfully - proceed with user creation/login
+        // Check if this is a Google OAuth flow
+        $googleEmail = session('google_oauth_email');
+        if ($googleEmail) {
+            $googleName = session('google_oauth_name');
+            $googleId = session('google_oauth_id');
 
-        if ($result['success']) {
-            // Check if this is a Google OAuth flow
-            $googleEmail = session('google_oauth_email');
-            if ($googleEmail) {
-                $googleName = session('google_oauth_name');
-                $googleId = session('google_oauth_id');
-
-                $user = User::where('email', $googleEmail)->first();
-                if (!$user) {
-                    $user = User::create([
-                        'name' => $googleName ?? explode('@', $googleEmail)[0],
-                        'email' => $googleEmail,
-                        'google_id' => $googleId,
-                        'email_verified_at' => now(),
-                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
-                    ]);
-
-                } else {
-                    if (!$user->google_id) {
-                        $user->google_id = $googleId;
-                        $user->email_verified_at = now();
-                        $user->save();
-
-                    }
+            $user = User::where('email', $googleEmail)->first();
+            if (!$user) {
+                $user = User::create([
+                    'name' => $googleName ?? explode('@', $googleEmail)[0],
+                    'email' => $googleEmail,
+                    'google_id' => $googleId,
+                    'email_verified_at' => now(),
+                    'password' => bcrypt(\Illuminate\Support\Str::random(32)),
+                ]);
+            } else {
+                if (!$user->google_id) {
+                    $user->google_id = $googleId;
+                    $user->email_verified_at = now();
+                    $user->save();
                 }
-
-                Auth::login($user);
-                Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
-
-                // Revoke all existing OAuth tokens for this user to prevent token reuse
-                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
-                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
-
-                // Check if this is an OAuth flow
-                if (session('oauth_request')) {
-                    return redirect()->route('oauth.authorize', [
-                        'client_id' => session('oauth_request')['client_id'],
-                        'redirect_uri' => session('oauth_request')['redirect_uri'],
-                        'response_type' => 'code',
-                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
-                        'state' => session('oauth_request')['state'] ?? null,
-                    ]);
-                }
-
-                return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
             }
 
-            // Check if this is a Facebook OAuth flow
-            $facebookEmail = session('facebook_oauth_email');
-            if ($facebookEmail) {
-                $facebookName = session('facebook_oauth_name');
-                $facebookId = session('facebook_oauth_id');
+            Auth::login($user);
+            Session::forget(['username', 'verification_username', 'google_oauth_name', 'google_oauth_email', 'google_oauth_id']);
 
-                $user = User::where('email', $facebookEmail)->first();
-                if (!$user) {
-                    $user = User::create([
-                        'name' => $facebookName ?? explode('@', $facebookEmail)[0],
-                        'email' => $facebookEmail,
-                        'facebook_id' => $facebookId,
-                        'email_verified_at' => now(),
-                        'password' => bcrypt(\Illuminate\Support\Str::random(32)),
-                    ]);
+            // Revoke all existing OAuth tokens for this user to prevent token reuse
+            \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
+            \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
 
-                } else {
-                    if (!$user->facebook_id) {
-                        $user->facebook_id = $facebookId;
-                        $user->email_verified_at = now();
-                        $user->save();
-
-                    }
-                }
-
-                Auth::login($user);
-                Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
-
-                // Revoke all existing OAuth tokens for this user to prevent token reuse
-                \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
-                \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
-
-                // Check if this is an OAuth flow
-                if (session('oauth_request')) {
-                    return redirect()->route('oauth.authorize', [
-                        'client_id' => session('oauth_request')['client_id'],
-                        'redirect_uri' => session('oauth_request')['redirect_uri'],
-                        'response_type' => 'code',
-                        'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
-                        'state' => session('oauth_request')['state'] ?? null,
-                    ]);
-                }
-
-                return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
+            // Check if this is an OAuth flow
+            if (session('oauth_request')) {
+                return redirect()->route('oauth.authorize', [
+                    'client_id' => session('oauth_request')['client_id'],
+                    'redirect_uri' => session('oauth_request')['redirect_uri'],
+                    'response_type' => 'code',
+                    'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                    'state' => session('oauth_request')['state'] ?? null,
+                ]);
             }
 
-            // Regular signup flow - update local user and redirect to login
-            $localUser = User::where('name', $request->username)->first();
-            if ($localUser) {
-                $localUser->email_verified_at = now();
-                $localUser->save();
-            }
-
-            Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
-
-            return redirect()->route('auth.login')
-                ->with('success', 'Account verified! You can now login.')
-                ->with('verified_username', $request->username);
-        } else {
-
-
-            // Provide more specific error messages
-            $errorMessage = $result['error'];
-            if (strpos($errorMessage, 'Invalid verification code') !== false) {
-                $errorMessage = 'Invalid verification code. Please check your email and try again.';
-            } elseif (strpos($errorMessage, 'CodeMismatchException') !== false) {
-                $errorMessage = 'The verification code is incorrect or has expired.';
-            } elseif (strpos($errorMessage, 'NotAuthorizedException') !== false) {
-                $errorMessage = 'This account is already confirmed or the code has expired. Please try logging in.';
-            } elseif (strpos($errorMessage, 'User does not exist') !== false) {
-                $errorMessage = 'User not found. Please register first.';
-            }
-
-            return back()->withInput(['username' => $request->username])->withErrors(['code' => $errorMessage]);
+            return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
         }
+
+        // Check if this is a Facebook OAuth flow
+        $facebookEmail = session('facebook_oauth_email');
+        if ($facebookEmail) {
+            $facebookName = session('facebook_oauth_name');
+            $facebookId = session('facebook_oauth_id');
+
+            $user = User::where('email', $facebookEmail)->first();
+            if (!$user) {
+                $user = User::create([
+                    'name' => $facebookName ?? explode('@', $facebookEmail)[0],
+                    'email' => $facebookEmail,
+                    'facebook_id' => $facebookId,
+                    'email_verified_at' => now(),
+                    'password' => bcrypt(\Illuminate\Support\Str::random(32)),
+                ]);
+            } else {
+                if (!$user->facebook_id) {
+                    $user->facebook_id = $facebookId;
+                    $user->email_verified_at = now();
+                    $user->save();
+                }
+            }
+
+            Auth::login($user);
+            Session::forget(['username', 'verification_username', 'facebook_oauth_name', 'facebook_oauth_email', 'facebook_oauth_id']);
+
+            // Revoke all existing OAuth tokens for this user to prevent token reuse
+            \App\Models\OAuthAccessToken::where('user_id', $user->id)->update(['revoked' => true]);
+            \App\Models\OAuthRefreshToken::where('user_id', $user->id)->update(['revoked' => true]);
+
+            // Check if this is an OAuth flow
+            if (session('oauth_request')) {
+                return redirect()->route('oauth.authorize', [
+                    'client_id' => session('oauth_request')['client_id'],
+                    'redirect_uri' => session('oauth_request')['redirect_uri'],
+                    'response_type' => 'code',
+                    'scope' => session('oauth_request')['scope'] ?? 'openid profile email',
+                    'state' => session('oauth_request')['state'] ?? null,
+                ]);
+            }
+
+            return redirect()->route('dashboard')->with('success', 'Email verified! Welcome.');
+        }
+
+        // Regular signup flow - update local user and redirect to login
+        $localUser = User::where('name', $request->username)->first();
+        if ($localUser) {
+            $localUser->email_verified_at = now();
+            $localUser->save();
+        }
+
+        Session::forget(['username', 'verification_username', 'verification_email', 'verification_expires_at']);
+
+        return redirect()->route('auth.login')
+            ->with('success', 'Account verified! You can now login.')
+            ->with('verified_username', $request->username);
     }
 
     public function resendVerificationCode(Request $request)
